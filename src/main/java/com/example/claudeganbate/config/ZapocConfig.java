@@ -31,6 +31,8 @@ public final class ZapocConfig {
         b.pop();
 
         b.push("difficulty");
+        DAY_SPEED = b.comment("難易度が上がる速さ。1=標準(L10は80日目) / 2=2倍速(40日目でL10) / 0.5=半分の速さ")
+            .defineInRange("daySpeed", 1.0, 0.1, 5.0);
         STAT_SCALE = b.comment("ゾンビ強化の倍率。0=バニラのまま / 1=標準 / 2=強化分(バニラとの差)が2倍")
             .defineInRange("statScale", 1.0, 0.0, 3.0);
         SPAWN_SCALE = b.comment("追加ゾンビの出現量の倍率。0=追加出現なし / 1=標準")
