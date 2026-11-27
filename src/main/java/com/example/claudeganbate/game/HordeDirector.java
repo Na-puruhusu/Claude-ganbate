@@ -5,6 +5,7 @@ import com.example.claudeganbate.config.ZapocConfig;
 import com.example.claudeganbate.difficulty.SpawnPlanner;
 import com.example.claudeganbate.difficulty.ThreatCalculator.Threat;
 import com.example.claudeganbate.difficulty.Tuning;
+import com.example.claudeganbate.item.ModItems;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
@@ -19,7 +20,9 @@ import net.minecraft.world.entity.monster.Zombie;
 import net.minecraft.world.entity.monster.ZombifiedPiglin;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraftforge.items.ItemHandlerHelper;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.entity.player.PlayerSleepInBedEvent;
@@ -50,10 +53,12 @@ public final class HordeDirector {
         int wavesLeft = 0, waveIdx = 0, wavesTotal = 0;
         long nextWave = 0;
         boolean hordeActive = false;
+        long lastDawnDay = -1;
+        int lastLevelInt = -1;
     }
 
     private static final Map<UUID, State> STATES = new HashMap<>();
-    private static final String TAG_LAST_HORDE = "zapoc_last_horde";   // 最後にホードを起こした日(+1)。再ログインでの重複防止
+    public static final String TAG_LAST_HORDE = "zapoc_last_horde";   // 最後にホードを起こした日(+1)。再ログインでの重複防止
     private static final int NIGHT_START = 13000, NIGHT_END = 23000, HORDE_START_LIMIT = 21000;
 
     @SubscribeEvent
@@ -102,8 +107,20 @@ public final class HordeDirector {
         boolean night = tod >= NIGHT_START && tod < NIGHT_END;
         boolean fragile = p.getHealth() < p.getMaxHealth() * 0.35f && p.tickCount - p.getLastHurtByMobTimestamp() < 300;
 
-        // ---- ホードナイトの開始 ----
         int interval = ZapocConfig.HORDE_INTERVAL_DAYS.get();
+
+        // ---- 夜明けの通知(日数・脅威レベル・次のホードナイト) ----
+        if (ZapocConfig.DAWN_MESSAGE.get() && tod < 1500 && st.lastDawnDay != dayIndex) {
+            st.lastDawnDay = dayIndex;
+            int lvInt = (int) Math.floor(th.progress());
+            long nextH = ZapocConfig.HORDES_ENABLED.get() ? SpawnPlanner.nextHordeNight(dayIndex, interval) : -1;
+            p.displayClientMessage(Component.translatable("zapoc.dawn", dayIndex + 1, String.format("%.1f", th.statLevel()),
+                nextH < 0 ? "-" : String.valueOf(nextH + 1)), false);
+            if (st.lastLevelInt >= 0 && lvInt > st.lastLevelInt) p.displayClientMessage(Component.translatable("zapoc.levelup", lvInt), false);
+            st.lastLevelInt = lvInt;
+        }
+
+        // ---- ホードナイトの開始 ----
         if (ZapocConfig.HORDES_ENABLED.get() && !st.hordeActive && night && tod < HORDE_START_LIMIT
             && SpawnPlanner.isHordeNight(dayIndex, interval)
             && p.getPersistentData().getLong(TAG_LAST_HORDE) != dayIndex + 1) {
@@ -120,7 +137,7 @@ public final class HordeDirector {
         // ---- ホードのウェーブ ----
         if (st.hordeActive) {
             if (!night) {                                   // 夜明けで終了
-                endHorde(p, st, now, false);
+                endHorde(p, st, now, false, sl);
             } else if (st.wavesLeft > 0 && now >= st.nextWave) {
                 if (fragile) {
                     st.nextWave = now + 15 * 20;            // 瀕死なら次の波を遅らせる
@@ -138,7 +155,7 @@ public final class HordeDirector {
                     if (st.wavesLeft == 0) st.relaxUntil = now + 90 * 20;   // 最終波の後も戦いは続く。緩和は少し先
                 }
             } else if (st.wavesLeft == 0 && now >= st.relaxUntil - 60 * 20 && countNearby(level, p) == 0) {
-                endHorde(p, st, now, true);                // 全滅させたら早期終了
+                endHorde(p, st, now, true, sl);                // 全滅させたら早期終了
             }
             return;                                         // ホード中は環境スポーンしない
         }
@@ -156,12 +173,20 @@ public final class HordeDirector {
         if (n > 0) spawnGroup(level, p, n, 0, false, true, rng);   // 暗い場所のみ(昼は洞窟や日陰)
     }
 
-    private static void endHorde(ServerPlayer p, State st, int now, boolean cleared) {
+    private static void endHorde(ServerPlayer p, State st, int now, boolean cleared, double level) {
         st.hordeActive = false;
         st.wavesLeft = 0;
         st.relaxUntil = now + 120 * 20;
         p.displayClientMessage(Component.translatable(cleared ? "zapoc.horde.cleared" : "zapoc.horde.dawn"), false);
+        if (ZapocConfig.HORDE_REWARD.get() && p.isAlive()) {
+            // 生き延びた報酬: 腐肉のエッセンス(撃退なら2倍)。エリクサーの材料
+            int n = Math.max(1, st.wavesTotal * (cleared ? 2 : 1) + (int) (level / 3.0));
+            ItemHandlerHelper.giveItemToPlayer(p, new ItemStack(ModItems.PUTRID_ESSENCE.get(), n));
+            p.displayClientMessage(Component.translatable("zapoc.horde.reward", n), false);
+        }
     }
+
+    public static void resetState(UUID id) { STATES.remove(id); }
 
     /** デバッグ用: /zapoc horde で即座にホードを開始する。 */
     public static void forceHorde(ServerPlayer p) {

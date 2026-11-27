@@ -1,0 +1,36 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    {
+      "item": "claudeganbate:elixir_vitality_4"
+    },
+    {
+      "item": "claudeganbate:putrid_essence"
+    },
+    {
+      "item": "claudeganbate:putrid_essence"
+    },
+    {
+      "item": "claudeganbate:putrid_essence"
+    },
+    {
+      "item": "claudeganbate:putrid_essence"
+    },
+    {
+      "item": "claudeganbate:putrid_essence"
+    },
+    {
+      "item": "claudeganbate:putrid_essence"
+    },
+    {
+      "item": "minecraft:glistering_melon_slice"
+    },
+    {
+      "item": "minecraft:glistering_melon_slice"
+    }
+  ],
+  "result": {
+    "item": "claudeganbate:elixir_vitality_5"
+  }
+}

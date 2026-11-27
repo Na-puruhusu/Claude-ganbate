@@ -24,6 +24,13 @@ public final class SpawnPlanner {
     public static boolean isHordeNight(long dayIndex, int intervalDays) {
         return intervalDays > 0 && dayIndex >= intervalDays - 1 && (dayIndex + 1) % intervalDays == 0;
     }
+    /** dayIndex 以降(当日を含む)で最初のホードナイトの日(0始まり)。interval<=0 なら -1。 */
+    public static long nextHordeNight(long dayIndex, int intervalDays) {
+        if (intervalDays <= 0) return -1;
+        long d = Math.max(0, dayIndex);
+        while (!isHordeNight(d, intervalDays)) d++;
+        return d;
+    }
     public static int hordeWaves(double level) { return level >= 8.0 ? 4 : level >= 2.5 ? 3 : 2; }
     public static double hordeWaveMean(double level, Tuning t) { return (3.0 + 0.55 * level) * t.spawnScale(); }
     public static int hordeWaveSize(double level, Tuning t, Random r) { return stochasticRound(hordeWaveMean(level, t), r); }

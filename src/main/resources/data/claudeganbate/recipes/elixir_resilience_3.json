@@ -1,0 +1,27 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    {
+      "item": "claudeganbate:elixir_resilience_2"
+    },
+    {
+      "item": "claudeganbate:putrid_essence"
+    },
+    {
+      "item": "claudeganbate:putrid_essence"
+    },
+    {
+      "item": "claudeganbate:putrid_essence"
+    },
+    {
+      "item": "claudeganbate:putrid_essence"
+    },
+    {
+      "item": "minecraft:iron_ingot"
+    }
+  ],
+  "result": {
+    "item": "claudeganbate:elixir_resilience_3"
+  }
+}

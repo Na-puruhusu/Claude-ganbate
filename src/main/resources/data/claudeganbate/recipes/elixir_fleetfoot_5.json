@@ -1,0 +1,36 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    {
+      "item": "claudeganbate:elixir_fleetfoot_4"
+    },
+    {
+      "item": "claudeganbate:putrid_essence"
+    },
+    {
+      "item": "claudeganbate:putrid_essence"
+    },
+    {
+      "item": "claudeganbate:putrid_essence"
+    },
+    {
+      "item": "claudeganbate:putrid_essence"
+    },
+    {
+      "item": "claudeganbate:putrid_essence"
+    },
+    {
+      "item": "claudeganbate:putrid_essence"
+    },
+    {
+      "item": "minecraft:sugar"
+    },
+    {
+      "item": "minecraft:sugar"
+    }
+  ],
+  "result": {
+    "item": "claudeganbate:elixir_fleetfoot_5"
+  }
+}

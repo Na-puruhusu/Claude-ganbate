@@ -8,13 +8,13 @@ package com.example.claudeganbate.difficulty;
 public final class GearBench {
     private GearBench() {}
 
-    // index = ステージ(0..10)。11要素目は端点
+    // index = 脅威レベル(0..10。その日数に到達した標準プレイヤー)。11要素目は端点
     //                                      S0    S1    S2    S3    S4    S5    S6    S7    S8    S9    S10   (end)
-    public static final double[] ARMOR  = { 0,    4,    8,    13,   17,   20,   20,   20,   20,   20,   20,   20 };
-    public static final double[] TOUGH  = { 0,    0,    0,    0,    3,    6,    8,    8,    8,    12,   12,   12 };
-    public static final double[] EPF    = { 0,    0,    1,    3,    5,    8,    10,   12,   14,   16,   18,   18 };
+    public static final double[] ARMOR  = { 0,    4,    8,    12,   16,   18,   20,   20,   20,   20,   20,   20 };
+    public static final double[] TOUGH  = { 0,    0,    0,    0,    2,    4,    6,    8,    8,    10,   12,   12 };
+    public static final double[] EPF    = { 0,    0,    1,    3,    5,    7,    9,    11,   13,   15,   17,   17 };
     /** 対ゾンビの近接ダメージ(武器+エンチャ。ゾンビはアンデッドなのでスマイトも含む) */
-    public static final double[] ATTACK = { 4,    5,    6,    7,    8,    10,   12,   13,   14,   15.5, 17,   17 };
+    public static final double[] ATTACK = { 4,    5,    6,    7,    8,    9.5,  11,   12.5, 14,   15.5, 17,   17 };
     public static final double PLAYER_HP = 20.0;
 
     /** 1回あたり被ダメージ(armor/toughness/EPF)の軽減率。バニラ式。 */

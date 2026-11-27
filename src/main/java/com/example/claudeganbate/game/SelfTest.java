@@ -2,10 +2,26 @@ package com.example.claudeganbate.game;
 
 import com.example.claudeganbate.ClaudeGanbate;
 import com.example.claudeganbate.config.ZapocConfig;
+import com.example.claudeganbate.difficulty.DayCurve;
+import com.example.claudeganbate.difficulty.ElixirModel;
 import com.example.claudeganbate.difficulty.Tuning;
 import com.example.claudeganbate.difficulty.Variant;
 import com.example.claudeganbate.difficulty.ZombieProfile;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.mojang.authlib.GameProfile;
+import com.example.claudeganbate.item.ElixirItem;
+import com.example.claudeganbate.item.ModItems;
 import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.CraftingRecipe;
+import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.crafting.RecipeType;
+import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -25,7 +41,11 @@ import net.minecraftforge.fml.common.Mod;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.Random;
+import java.util.UUID;
 
 /**
  * CI専用の自己診断。環境変数 ZAPOC_SELFTEST がある専用サーバーでのみ動き、FakePlayer を使って
@@ -61,7 +81,8 @@ public final class SelfTest {
                 case 1 -> { spawnVariants(); phase = 2; wait = 40; }      // 装備の属性反映は1tick後なので少し待つ
                 case 2 -> { verifyVariants(); spawnHorde(); phase = 3; wait = 40; }
                 case 3 -> { verifyHorde(); killBloater(); phase = 4; wait = 10; }
-                case 4 -> { verifyCloud(); finish(server); phase = 5; }
+                case 4 -> { verifyCloud(); phase = 5; wait = 2; }
+                case 5 -> { testDayBased(); testElixirs(server); testRecipes(server); testAssets(); finish(server); phase = 6; }
                 default -> { }
             }
         } catch (Throwable t) {
@@ -91,8 +112,7 @@ public final class SelfTest {
         // 実測の脅威計算(固定なし)も呼べること。新規ワールドのFakePlayerはステージ0のはず
         ThreatTracker.setOverride(fp.getUUID(), null);
         ThreatTracker.Snapshot s = ThreatTracker.get(fp);
-        check(s.threat().stage() == 0, "新規プレイヤーのステージが0でない: " + s.threat().stage());
-        check(s.threat().progress() >= 0 && s.threat().progress() < 2.0, "progress が範囲外: " + s.threat().progress());
+        check(s.threat().progress() >= 0 && s.threat().progress() < 0.5, "新規ワールド(0日目)の脅威レベルが範囲外: " + s.threat().progress());
         ThreatTracker.setOverride(fp.getUUID(), 8.0);
         check(ThreatTracker.get(fp).threat().statLevel() == 8.0, "override が効いていない");
         check(ZapocConfig.ENABLED.get(), "config が読めない/無効");
@@ -169,6 +189,141 @@ public final class SelfTest {
         List<AreaEffectCloud> clouds = level.getEntitiesOfClass(AreaEffectCloud.class, fp.getBoundingBox().inflate(40));
         check(!clouds.isEmpty(), "ブローターの毒ガスが発生していない");
         ClaudeGanbate.LOGGER.info("SELFTEST clouds: {}", clouds.size());
+    }
+
+    /** 難易度は世界の日数で決まる: 時刻を進めると脅威レベルがDayCurveどおりに上がる。 */
+    private static void testDayBased() {
+        long keep = level.getDayTime();
+        ThreatTracker.setOverride(fp.getUUID(), null);
+        for (int day : new int[]{0, 7, 25, 80, 150}) {
+            level.setDayTime(day * 24000L + 18000);
+            ThreatTracker.invalidate(fp.getUUID());
+            double got = ThreatTracker.get(fp).threat().progress();
+            double want = DayCurve.levelAt(day + 18000 / 24000.0, ZapocConfig.DAY_SPEED.get());
+            check(Math.abs(got - want) < 0.01, String.format("%d日目の脅威レベル %.3f != 期待 %.3f", day, got, want));
+        }
+        level.setDayTime(keep);
+        ThreatTracker.setOverride(fp.getUUID(), 8.0);
+        ClaudeGanbate.LOGGER.info("SELFTEST day-based threat verified");
+    }
+
+    private static void testElixirs(MinecraftServer server) {
+        for (ElixirModel.Kind k : ElixirModel.Kind.values()) ElixirState.set(fp, k, 0);
+        ElixirState.apply(fp);
+        double hp0 = fp.getMaxHealth();
+
+        // 飲むとレベルが上がり、最大体力が増え、空き瓶が返る
+        ItemStack st = new ItemStack(ModItems.elixir(ElixirModel.Kind.VITALITY, 2));
+        ItemStack out = st.getItem().finishUsingItem(st, level, fp);
+        check(ElixirState.get(fp, ElixirModel.Kind.VITALITY) == 2, "エリクサーを飲んでもレベルが上がらない");
+        check(Math.abs(fp.getMaxHealth() - (hp0 + ElixirModel.maxHpBonus(2))) < 0.01, "活力Lv2の最大体力が不正: " + fp.getMaxHealth());
+        check(out.is(Items.GLASS_BOTTLE), "飲んだ後に空き瓶が返らない");
+
+        // 同じ/低いレベルは飲めない(消費しない)
+        ItemStack st2 = new ItemStack(ModItems.elixir(ElixirModel.Kind.VITALITY, 1));
+        ItemStack out2 = st2.getItem().finishUsingItem(st2, level, fp);
+        check(out2 == st2 && st2.getCount() == 1 && ElixirState.get(fp, ElixirModel.Kind.VITALITY) == 2, "低いレベルのエリクサーを消費してしまった");
+
+        // 全種Lv5: 属性に反映される
+        for (ElixirModel.Kind k : ElixirModel.Kind.values()) ElixirState.set(fp, k, 5);
+        ElixirState.apply(fp);
+        check(Math.abs(fp.getMaxHealth() - (20.0 + 10.0)) < 0.01, "全種Lv5の最大体力 != 30: " + fp.getMaxHealth());
+        check(Math.abs(fp.getAttributeValue(Attributes.ATTACK_DAMAGE) - (1.0 + 4.0)) < 0.01, "凶暴Lv5の攻撃力が不正: " + fp.getAttributeValue(Attributes.ATTACK_DAMAGE));
+        check(Math.abs(fp.getAttributeValue(Attributes.MOVEMENT_SPEED) / 0.1 - 1.2) < 0.01, "俊足Lv5の速度倍率が不正: " + fp.getAttributeValue(Attributes.MOVEMENT_SPEED) / 0.1);
+        check(Math.abs(fp.getAttributeValue(Attributes.ARMOR) - 5.0) < 0.01, "頑強Lv5の防御が不正: " + fp.getAttributeValue(Attributes.ARMOR));
+        check(Math.abs(fp.getAttributeValue(Attributes.KNOCKBACK_RESISTANCE) - 0.3) < 0.01, "頑強Lv5のKB耐性が不正");
+        ElixirState.apply(fp);   // 冪等(二重に積まれない)
+        check(Math.abs(fp.getMaxHealth() - 30.0) < 0.01, "apply を繰り返すと効果が重複する");
+
+        // 死亡・帰還を想定した引き継ぎ
+        Player fp2 = FakePlayerFactory.get(level, new GameProfile(UUID.nameUUIDFromBytes("zapoc_test2".getBytes(StandardCharsets.UTF_8)), "zapoc_test2"));
+        ElixirState.copy(fp, fp2);
+        ElixirState.apply(fp2);
+        check(ElixirState.get(fp2, ElixirModel.Kind.RESILIENCE) == 5 && Math.abs(fp2.getMaxHealth() - 30.0) < 0.01, "死亡後の引き継ぎでエリクサーが消えた");
+
+        // エリクサーを飲んだ分、脅威(DDA)が上がる(強くなるほど少し厳しくなる)
+        ThreatTracker.setOverride(fp.getUUID(), null);
+        ThreatTracker.invalidate(fp.getUUID());
+        double adj = ThreatTracker.get(fp).threat().adj();
+        check(adj > 0.0, "エリクサーで強くなってもDDAの補正が上がらない: " + adj);
+        ThreatTracker.setOverride(fp.getUUID(), 8.0);
+
+        // 腐肉ドロップ
+        Zombie alpha = EntityType.ZOMBIE.create(level);
+        alpha.getPersistentData().putBoolean(ZombieEmpowerer.TAG_DONE, true);
+        alpha.getPersistentData().putString(ZombieEmpowerer.TAG_VARIANT, "alpha");
+        alpha.getPersistentData().putDouble(ZombieEmpowerer.TAG_LEVEL, 8.0);
+        check(ElixirEvents.extraFlesh(alpha, 0, new Random(3)) >= 6, "アルファの追加腐肉ドロップが少ない");
+        for (ElixirModel.Kind k : ElixirModel.Kind.values()) ElixirState.set(fp, k, 0);
+        ElixirState.apply(fp);
+        ClaudeGanbate.LOGGER.info("SELFTEST elixirs verified");
+    }
+
+    private static void testRecipes(MinecraftServer server) {
+        var ra = server.registryAccess();
+        var all = server.getRecipeManager().getAllRecipesFor(RecipeType.CRAFTING).stream()
+            .filter(r -> r.getId().getNamespace().equals(ClaudeGanbate.MODID)).toList();
+        check(all.size() == 1 + ElixirModel.Kind.values().length * ElixirModel.MAX_LEVEL, "mod のレシピ数が不正: " + all.size());
+
+        Item essence = ModItems.PUTRID_ESSENCE.get();
+        CraftingRecipe er = all.stream().filter(r -> r.getResultItem(ra).is(essence)).findFirst().orElse(null);
+        check(er != null && er.getIngredients().size() == ElixirModel.FLESH_PER_ESSENCE
+            && er.getIngredients().stream().allMatch(i -> i.test(new ItemStack(Items.ROTTEN_FLESH))), "腐肉のエッセンスのレシピが不正");
+
+        for (ElixirModel.Kind k : ElixirModel.Kind.values()) {
+            Item catalyst = ForgeRegistries.ITEMS.getValue(new ResourceLocation(k.catalyst));
+            for (int lv = 1; lv <= ElixirModel.MAX_LEVEL; lv++) {
+                Item result = ModItems.elixir(k, lv);
+                CraftingRecipe r = all.stream().filter(x -> x.getResultItem(ra).is(result)).findFirst().orElse(null);
+                String name = k.id + " Lv" + lv;
+                if (r == null) { check(false, name + " のレシピが無い"); continue; }
+                Item base = lv == 1 ? Items.GLASS_BOTTLE : ModItems.elixir(k, lv - 1);
+                int nEss = 0, nCat = 0, nBase = 0;
+                for (Ingredient ing : r.getIngredients()) {
+                    if (ing.test(new ItemStack(essence))) nEss++;
+                    else if (ing.test(new ItemStack(catalyst))) nCat++;
+                    else if (ing.test(new ItemStack(base))) nBase++;
+                }
+                check(nEss == ElixirModel.essenceCost(lv), name + " のエッセンス数 " + nEss + " != " + ElixirModel.essenceCost(lv));
+                check(nCat == ElixirModel.catalystCost(lv), name + " の触媒数 " + nCat + " != " + ElixirModel.catalystCost(lv));
+                check(nBase == 1 && r.getIngredients().size() == nEss + nCat + nBase, name + " のレシピ構成が不正");
+            }
+        }
+        ClaudeGanbate.LOGGER.info("SELFTEST recipes verified: {}", all.size());
+    }
+
+    /** アイテムの登録・モデル・テクスチャ・言語ファイル(日英)が全部そろっているか。 */
+    private static void testAssets() {
+        java.util.List<String> ids = new java.util.ArrayList<>();
+        ids.add("putrid_essence");
+        for (ElixirModel.Kind k : ElixirModel.Kind.values()) for (int lv = 1; lv <= ElixirModel.MAX_LEVEL; lv++) ids.add("elixir_" + k.id + "_" + lv);
+        for (String id : ids) {
+            check(ForgeRegistries.ITEMS.getValue(new ResourceLocation(ClaudeGanbate.MODID, id)) != Items.AIR, "アイテム未登録: " + id);
+            check(exists("/assets/" + ClaudeGanbate.MODID + "/models/item/" + id + ".json"), "モデルが無い: " + id);
+            check(exists("/assets/" + ClaudeGanbate.MODID + "/textures/item/" + id + ".png"), "テクスチャが無い: " + id);
+        }
+        for (String lang : new String[]{"en_us", "ja_jp"}) {
+            JsonObject json = readJson("/assets/" + ClaudeGanbate.MODID + "/lang/" + lang + ".json");
+            if (json == null) { check(false, "言語ファイルが読めない: " + lang); continue; }
+            for (String id : ids) check(json.has("item." + ClaudeGanbate.MODID + "." + id), lang + " に item." + id + " の名前が無い");
+            for (ElixirModel.Kind k : ElixirModel.Kind.values()) {
+                check(json.has("tooltip." + ClaudeGanbate.MODID + "." + k.id), lang + " に tooltip." + k.id + " が無い");
+                check(json.has("zapoc.elixir.kind." + k.id), lang + " に zapoc.elixir.kind." + k.id + " が無い");
+            }
+            for (String key : new String[]{"zapoc.dawn", "zapoc.levelup", "zapoc.horde.warning", "zapoc.horde.wave", "zapoc.horde.dawn", "zapoc.horde.cleared",
+                "zapoc.horde.reward", "zapoc.sleep.blocked", "zapoc.elixir.drunk", "zapoc.elixir.already", "tooltip.claudeganbate.permanent", "tooltip.claudeganbate.level"})
+                check(json.has(key), lang + " に " + key + " が無い");
+        }
+        ClaudeGanbate.LOGGER.info("SELFTEST assets verified: {} items", ids.size());
+    }
+
+    private static boolean exists(String path) { return SelfTest.class.getResource(path) != null; }
+
+    private static JsonObject readJson(String path) {
+        try (InputStream in = SelfTest.class.getResourceAsStream(path)) {
+            if (in == null) return null;
+            return JsonParser.parseReader(new InputStreamReader(in, StandardCharsets.UTF_8)).getAsJsonObject();
+        } catch (Exception e) { return null; }
     }
 
     private static void finish(MinecraftServer server) {

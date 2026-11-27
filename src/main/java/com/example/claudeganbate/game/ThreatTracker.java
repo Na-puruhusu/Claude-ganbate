@@ -1,20 +1,15 @@
 package com.example.claudeganbate.game;
 
 import com.example.claudeganbate.config.ZapocConfig;
-import com.example.claudeganbate.difficulty.Milestones;
+import com.example.claudeganbate.difficulty.ElixirModel;
 import com.example.claudeganbate.difficulty.ThreatCalculator;
 import com.example.claudeganbate.difficulty.ThreatCalculator.Inputs;
 import com.example.claudeganbate.difficulty.ThreatCalculator.Threat;
-import net.minecraft.advancements.Advancement;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.PlayerAdvancements;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.stats.Stats;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.MobType;
-import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
 
@@ -23,8 +18,9 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * プレイヤーごとの脅威レベルを算出してキャッシュする。ステージは進捗(advancement)から毎回導くので保存データは不要。
- * 生存日数は統計 TIME_SINCE_DEATH(死亡でリセットされる)を使うので、死亡すると自然に緩和される。
+ * プレイヤーごとの脅威レベルを算出してキャッシュする。
+ * 難易度は世界の経過日数で決まり(DayCurve)、プレイヤーの装備(エリクサー込み)の強さで少し補正される(DDA)。
+ * 保存データは不要(日数はワールド時間、装備は現在の状態から毎回導く)。
  */
 public final class ThreatTracker {
     private ThreatTracker() {}
@@ -42,6 +38,8 @@ public final class ThreatTracker {
 
     public static void forget(UUID id) { CACHE.remove(id); OVERRIDE.remove(id); }
 
+    public static void invalidate(UUID id) { CACHE.remove(id); }
+
     public static Snapshot get(ServerPlayer p) {
         long now = p.server.getTickCount();
         Snapshot s = CACHE.get(p.getUUID());
@@ -51,24 +49,23 @@ public final class ThreatTracker {
         return s;
     }
 
-    private static Snapshot compute(ServerPlayer p, long now) {
-        MinecraftServer server = p.server;
-        PlayerAdvancements pa = p.getAdvancements();
-        int stage = Milestones.stageOf(id -> {
-            Advancement a = server.getAdvancements().getAdvancement(new ResourceLocation(id));
-            return a != null && pa.getOrStartProgress(a).isDone();
-        });
-        double daysSinceDeath = p.getStats().getValue(Stats.CUSTOM.get(Stats.TIME_SINCE_DEATH)) / 24000.0;
-        double worldDay = server.overworld().getDayTime() / 24000.0;
+    /** 世界の経過日数(オーバーワールドの時刻。寝て夜を飛ばした分も日数に数える)。 */
+    public static double worldDay(ServerPlayer p) {
+        return p.server.overworld().getDayTime() / 24000.0;
+    }
 
-        double armor = p.getArmorValue();
+    private static Snapshot compute(ServerPlayer p, long now) {
+        double day = worldDay(p);
+        // 防御・最大体力は属性から読む(エリクサー・装備・エンチャントの効果を含む)
+        double armor = p.getAttributeValue(Attributes.ARMOR);
         double tough = p.getAttributeValue(Attributes.ARMOR_TOUGHNESS);
         int epf = EnchantmentHelper.getDamageProtection(p.getArmorSlots(), p.damageSources().generic());
-        Inputs in = new Inputs(stage, daysSinceDeath, worldDay, p.getMaxHealth(), armor, tough, epf, bestMeleeVsUndead(p));
+        double attack = bestMeleeVsUndead(p) + ElixirModel.attackBonus(ElixirState.get(p, ElixirModel.Kind.FEROCITY));
+        Inputs in = new Inputs(day, p.getMaxHealth(), armor, tough, epf, attack);
 
-        Double ov = OVERRIDE.get(p.getUUID());
         Threat th = ThreatCalculator.compute(in, ZapocConfig.tuning());
-        if (ov != null) th = new Threat(stage, ov, 0, ov, ov);
+        Double ov = OVERRIDE.get(p.getUUID());
+        if (ov != null) th = new Threat(day, ov, 0, ov, ov);
         return new Snapshot(th, in, now, ov != null);
     }
 

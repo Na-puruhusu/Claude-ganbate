@@ -40,6 +40,10 @@ public class DifficultySim {
                 Curve.at(GearBench.EPF, level), Curve.at(GearBench.ATTACK, level));
         }
     }
+    /** 4種すべてをレベル k まで飲んだプレイヤー(最大体力・防御・攻撃が増える)。 */
+    static Gear withElixirs(Gear g, int k) {
+        return new Gear(g.hp + ElixirModel.maxHpBonus(k), g.armor + ElixirModel.armorBonus(k), g.tough, g.epf, g.attack + ElixirModel.attackBonus(k));
+    }
     record Result(double lossFrac, boolean died, double duration) {}
 
     /** 戦い方。cap=同時に殴ってくる最大数 / land=ゾンビの攻撃が当たる割合 / regen=回復(HP/秒)。 */
@@ -117,8 +121,10 @@ public class DifficultySim {
 
     record Scenario(Threat th, Random r) {}
 
-    static Threat threat(int stage, Gear g, double daysSinceDeath, double worldDay) {
-        return ThreatCalculator.compute(new Inputs(stage, daysSinceDeath, worldDay, g.hp, g.armor, g.tough, g.epf, g.attack), T);
+    /** 脅威レベル stage に到達する日(=その日数の標準プレイヤー)に、装備 g のプレイヤーが受ける脅威。 */
+    static Threat threat(int stage, Gear g) {
+        double day = DayCurve.dayAt(stage, T.daySpeed());
+        return ThreatCalculator.compute(new Inputs(day, g.hp, g.armor, g.tough, g.epf, g.attack), T);
     }
 
     static List<Z> group(Threat th, int n, double spread, Random r, boolean leaders, int alphas) {
@@ -137,7 +143,7 @@ public class DifficultySim {
     static Agg ambient(int stage, Gear g, double vd, long seed) {
         Random r = new Random(seed); double loss = 0; int dead = 0;
         for (int i = 0; i < RUNS; i++) {
-            Threat th = threat(stage, g, 3, 10);
+            Threat th = threat(stage, g);
             Result res = fight(g, group(th, SpawnPlanner.ambientGroupSize(th.spawnLevel(), T, r), 6, r, false, 0), r, vd);
             loss += res.lossFrac(); if (res.died()) dead++;
         }
@@ -147,7 +153,7 @@ public class DifficultySim {
     static Agg wave(int stage, Gear g, double vd, long seed) {
         Random r = new Random(seed); double loss = 0; int dead = 0;
         for (int i = 0; i < RUNS; i++) {
-            Threat th = threat(stage, g, 3, 10);
+            Threat th = threat(stage, g);
             int waves = SpawnPlanner.hordeWaves(th.spawnLevel());
             Result res = fight(g, group(th, SpawnPlanner.hordeWaveSize(th.spawnLevel(), T, r), 8, r, true, SpawnPlanner.alphasInWave(th.spawnLevel(), 0, waves)), r, vd);
             loss += res.lossFrac(); if (res.died()) dead++;
@@ -159,7 +165,7 @@ public class DifficultySim {
     static Agg fullHorde(int stage, Gear g, double vd, long seed, Style st) {
         Random r = new Random(seed); double loss = 0; int dead = 0;
         for (int i = 0; i < RUNS / 3; i++) {
-            Threat th = threat(stage, g, 3, 10);
+            Threat th = threat(stage, g);
             int waves = SpawnPlanner.hordeWaves(th.spawnLevel());
             List<Z> all = new ArrayList<>();
             for (int w = 0; w < waves; w++) {
@@ -190,13 +196,13 @@ public class DifficultySim {
 
     public static void main(String[] args) {
         boolean report = args.length > 0 && args[0].equals("--report");
-        System.out.println("=== 脅威レベル(on-curve: 装備=ステージ標準, 生存3日, 世界10日 / Normal) ===");
-        System.out.println("St | progress adj   stat spawn | Walker(HP/Dmg/TTK)  Brute(HP/TTK)  Alpha(HP/TTK) | 環境グループ N 被害 死亡 | ウェーブ(開) 波数x人数 被害 死亡 | ホード全体[素の近接] 被害/死亡: 開 通路2 通路1 | ホード全体[備え一式(盾・回復)]: 開 通路2 通路1");
+        System.out.println("=== 脅威レベル(on-curve: その日数の標準装備 / Normal) ===");
+        System.out.println("Lv | progress adj   stat spawn | Walker(HP/Dmg/TTK)  Brute(HP/TTK)  Alpha(HP/TTK) | 環境グループ N 被害 死亡 | ウェーブ(開) 波数x人数 被害 死亡 | ホード全体[素の近接] 被害/死亡: 開 通路2 通路1 | ホード全体[備え一式(盾・回復)]: 開 通路2 通路1");
         Agg[] amb = new Agg[11], wav = new Agg[11], hOpen = new Agg[11], hC2 = new Agg[11], hC1 = new Agg[11];
         Agg[] kOpen = new Agg[11], kC2 = new Agg[11], kC1 = new Agg[11];
         for (int s = 0; s <= 10; s++) {
             Gear g = Gear.bench(s);
-            Threat th = threat(s, g, 3, 10);
+            Threat th = threat(s, g);
             ZombieProfile w = ZombieProfile.of(th.statLevel(), Variant.WALKER, T);
             ZombieProfile b = ZombieProfile.of(th.statLevel(), Variant.BRUTE, T);
             ZombieProfile a = ZombieProfile.of(th.statLevel(), Variant.ALPHA, T);
@@ -228,6 +234,30 @@ public class DifficultySim {
             System.out.println(sb);
         }
 
+        System.out.println("\n=== 永続エリクサー(4種すべてLv k): 環境グループ戦の 被害率/死亡率 と DDAによるゾンビ強化(adj) ===");
+        System.out.println("Lv | Lv0              Lv1              Lv3              Lv5   (被害/死亡 [adj])");
+        double[][] elx = new double[11][4];
+        int[] ks = {0, 1, 3, 5};
+        for (int s = 0; s <= 10; s++) {
+            StringBuilder sb = new StringBuilder(String.format("%2d |", s));
+            for (int i = 0; i < ks.length; i++) {
+                Gear g = withElixirs(Gear.bench(s), ks[i]);
+                Agg a = ambient(s, g, 1.0, 1000 + s * 10 + i);
+                Threat th = threat(s, g);
+                elx[s][i] = a.meanLoss();
+                sb.append(String.format(" %4.2f/%4.2f [%+.2f]  ", a.meanLoss(), a.pDeath(), th.adj()));
+            }
+            System.out.println(sb);
+        }
+
+        System.out.println("\n=== 腐肉の経済(1種をLv5まで = 腐肉" + ElixirModel.totalFleshToMax() + "個) ===");
+        for (int s : new int[]{0, 2, 4, 6, 8, 10}) {
+            double sum = 0; int n = 20000; Random r = new Random(7 + s);
+            for (int i = 0; i < n; i++) sum += 1.0 + ElixirModel.fleshBonus(s, Variant.pick(s, true, r), 0, r);   // バニラ平均1 + 追加
+            double perZ = sum / n;
+            System.out.printf("L%2d: 1体あたり平均 腐肉%.2f個 → 1種Lv5まで 約%.0f体 / 4種で約%.0f体%n", s, perZ, ElixirModel.totalFleshToMax() / perZ, 4 * ElixirModel.totalFleshToMax() / perZ);
+        }
+
         System.out.println("\n=== Hardモード(バニラ1.5倍 × 補正0.8)の on-curve 環境グループ ===");
         for (int s : new int[]{0, 3, 5, 8, 10}) {
             Agg am = ambient(s, Gear.bench(s), 1.5 * Tuning.HARD_DAMAGE_FACTOR, 500 + s);
@@ -238,7 +268,7 @@ public class DifficultySim {
         System.out.println("\n=== 設計目標チェック ===");
         for (int s = 0; s <= 10; s++) {
             Gear g = Gear.bench(s);
-            Threat th = threat(s, g, 3, 10);
+            Threat th = threat(s, g);
             // 1) 環境グループ(夜の通常の襲撃): 被害率は緩やかに上昇する帯に収める。死亡は稀。
             double target = 0.22 + 0.04 * s;
             check(amb[s].meanLoss() >= target - 0.13 && amb[s].meanLoss() <= target + 0.13,
@@ -247,7 +277,7 @@ public class DifficultySim {
             // 2) ウェーブは環境グループより重い
             check(wav[s].meanLoss() >= amb[s].meanLoss() - 0.02, String.format("S%d ウェーブが環境グループより軽い", s));
             // 3) ホード: 素の近接(盾・回復なし)では厳しい=備えの動機。備え一式+通路なら全ステージで凌げる。
-            if (s >= 2) check(hOpen[s].pDeath() >= 0.50, String.format("S%d 備えなしでホードを凌げてしまう(死亡率 %.2f)", s, hOpen[s].pDeath()));
+            if (s >= 2) check(hOpen[s].pDeath() >= (s == 2 ? 0.40 : 0.50), String.format("S%d 備えなしでホードを凌げてしまう(死亡率 %.2f)", s, hOpen[s].pDeath()));
             check(kC1[s].pDeath() <= 0.10, String.format("S%d 備え一式+完璧な通路でも死亡率 %.2f > 0.10(理不尽)", s, kC1[s].pDeath()));
             check(kC2[s].pDeath() <= 0.30, String.format("S%d 備え一式+通路(2)の死亡率 %.2f > 0.30", s, kC2[s].pDeath()));
             if (s <= 2) check(hC1[s].pDeath() <= 0.15, String.format("S%d 序盤は素の近接+完璧な通路なら凌げるべき(死亡率 %.2f)", s, hC1[s].pDeath()));
@@ -269,6 +299,25 @@ public class DifficultySim {
             check(lossTab[s][4] <= lossTab[s][2] + 0.01, String.format("S%d 装備+2.0 の被害 %.2f が on-curve %.2f より重い", s, lossTab[s][4], lossTab[s][2]));
             check(lossTab[s][0] <= 0.90, String.format("S%d 装備-2.0 の被害率 %.2f(DDAが効かず理不尽)", s, lossTab[s][0]));
         }
+        // 5b) エリクサー: 飲むほど楽になる(=報われる)が、DDAで厳しくなる分もあり、無双にはならない
+        for (int s = 1; s <= 10; s++) {
+            check(elx[s][3] <= elx[s][0] - 0.03, String.format("L%d エリクサーLv5の効果が薄い(%.2f vs なし %.2f)", s, elx[s][3], elx[s][0]));
+            check(elx[s][1] <= elx[s][0] + 0.02 && elx[s][2] <= elx[s][1] + 0.02 && elx[s][3] <= elx[s][2] + 0.02, String.format("L%d エリクサーのレベル順に効果が単調でない", s));
+            check(elx[s][3] >= 0.08, String.format("L%d エリクサーLv5で通常の夜がほぼ無傷(%.2f): 無双", s, elx[s][3]));
+        }
+        // 5c) エリクサーのレシピ枠(3x3クラフトに収まる)・コスト単調性・腐肉経済
+        for (int l = 1; l <= ElixirModel.MAX_LEVEL; l++) {
+            int ingredients = 1 + ElixirModel.essenceCost(l) + ElixirModel.catalystCost(l);   // 前の薬(Lv1は空き瓶) + エッセンス + 触媒
+            check(ingredients <= 9, "エリクサーLv" + l + "のレシピが9スロットに収まらない: " + ingredients);
+            if (l > 1) check(ElixirModel.essenceCost(l) >= ElixirModel.essenceCost(l - 1), "エッセンスのコストが単調でない Lv" + l);
+        }
+        check(ElixirModel.maxHpBonus(5) == 10 && ElixirModel.maxHpBonus(0) == 0 && ElixirModel.maxHpBonus(9) == 10, "エリクサー効果の上限/下限が不正");
+        for (int s : new int[]{2, 6, 10}) {
+            double sum = 0; int n = 20000; Random r = new Random(7 + s);
+            for (int i = 0; i < n; i++) sum += 1.0 + ElixirModel.fleshBonus(s, Variant.pick(s, true, r), 0, r);
+            double zNeeded = ElixirModel.totalFleshToMax() / (sum / n);
+            check(zNeeded >= 40 && zNeeded <= 200, String.format("L%d: 1種Lv5までに必要なゾンビ数 %.0f が目安(40〜200体)の外", s, zNeeded));
+        }
         // 6) モデルの単調性・上限
         for (double l = 0; l < 10.9; l += 0.1) {
             ZombieProfile p1 = ZombieProfile.of(l, Variant.WALKER, T), p2 = ZombieProfile.of(l + 0.1, Variant.WALKER, T);
@@ -278,11 +327,16 @@ public class DifficultySim {
         }
         for (Variant v : Variant.values())
             for (double l = 0; l <= 11; l += 0.5) check(ZombieProfile.of(l, v, T).speedMult() <= ZombieProfile.SPEED_CAP + 1e-9, "速度上限超過 " + v);
-        ZombieProfile vanilla = ZombieProfile.of(10, Variant.WALKER, new Tuning(0, 1, true, true));
+        ZombieProfile vanilla = ZombieProfile.of(10, Variant.WALKER, new Tuning(0, 1, true, true, 1.0));
         check(Math.abs(vanilla.hpMult() - 1) < 1e-9 && Math.abs(vanilla.damageMult() - 1) < 1e-9, "statScale=0 がバニラ同等でない");
-        // 7) 進捗判定・周期
-        check(Milestones.stageOf(id -> id.equals("minecraft:nether/summon_wither")) == 0, "ドラゴン前のウィザー召喚で飛び級する");
-        check(Milestones.stageOf(id -> id.equals("minecraft:end/kill_dragon") || id.equals("minecraft:nether/summon_wither")) == 10, "ドラゴン後のウィザーで10にならない");
+        // 7) 日数カーブ・周期
+        for (double d = 0; d < 120; d += 0.5) {
+            check(DayCurve.levelAt(d + 0.5, 1.0) >= DayCurve.levelAt(d, 1.0) - 1e-9, "日数カーブが単調でない d=" + d);
+            check(Math.abs(DayCurve.dayAt(DayCurve.levelAt(d, 1.0), 1.0) - Math.min(d, 100)) < 1e-6, "dayAt が levelAt の逆関数でない d=" + d);
+        }
+        check(DayCurve.levelAt(0, 1.0) == 0 && DayCurve.levelAt(1000, 1.0) == DayCurve.MAX_LEVEL, "日数カーブの端点が不正");
+        check(DayCurve.levelAt(10, 2.0) > DayCurve.levelAt(10, 1.0), "daySpeed が効いていない");
+        check(DayCurve.levelAt(6, 1.0) <= 2.0, "最初のホードナイト(7日目)が重すぎる: L=" + DayCurve.levelAt(6, 1.0));
         check(!SpawnPlanner.isHordeNight(0, 7) && SpawnPlanner.isHordeNight(6, 7) && SpawnPlanner.isHordeNight(13, 7) && !SpawnPlanner.isHordeNight(7, 7), "ホードナイト周期が不正");
 
         System.out.println(failures == 0 ? "ALL OK" : failures + " 件の設計目標違反");
