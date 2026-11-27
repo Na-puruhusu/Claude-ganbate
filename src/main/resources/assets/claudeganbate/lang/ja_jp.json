@@ -1,1 +1,7 @@
-{}
+{
+  "zapoc.horde.warning": "§c[ゾンビアポカリプス] 今夜、ゾンビの大群が押し寄せる…拠点を固めて備えろ！",
+  "zapoc.horde.wave": "§c第%1$s波 / %2$s",
+  "zapoc.horde.dawn": "§e[ゾンビアポカリプス] 夜が明けた。大群は退いていく。",
+  "zapoc.horde.cleared": "§a[ゾンビアポカリプス] 守り切った。大群を撃退した！",
+  "zapoc.sleep.blocked": "眠れない。今夜は死者たちが騒がしい。"
+}

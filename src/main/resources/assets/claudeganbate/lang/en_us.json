@@ -1,1 +1,7 @@
-{}
+{
+  "zapoc.horde.warning": "§c[Zombie Apocalypse] A horde is coming tonight... Fortify your base and get ready!",
+  "zapoc.horde.wave": "§cWave %1$s / %2$s",
+  "zapoc.horde.dawn": "§e[Zombie Apocalypse] Dawn breaks. The horde falls back.",
+  "zapoc.horde.cleared": "§a[Zombie Apocalypse] You held the line. The horde is cleared.",
+  "zapoc.sleep.blocked": "You can't sleep. The dead are restless tonight."
+}
