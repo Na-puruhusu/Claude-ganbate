@@ -1,0 +1,42 @@
+name: Server smoke test
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+      - run: chmod +x gradlew
+      - name: Start dedicated server and verify the mod loads
+        run: |
+          mkdir -p run && echo "eula=true" > run/eula.txt
+          ./gradlew runServer --no-daemon > server.log 2>&1 &
+          PID=$!
+          ok=0
+          for i in $(seq 1 240); do
+            if grep -q 'Done (' server.log; then ok=1; break; fi
+            if ! kill -0 $PID 2>/dev/null; then break; fi
+            sleep 5
+          done
+          sleep 5
+          pkill -f 'net.minecraftforge.bootstrap' || true
+          pkill -f 'gradlew' || true
+          tail -n 60 server.log
+          test $ok -eq 1 || { echo "::error::server did not finish starting"; exit 1; }
+          grep -q 'Zombie Apocalypse loaded' server.log || { echo "::error::mod was not loaded"; exit 1; }
+          if grep -E 'ERROR|Exception' server.log | grep -iE 'claudeganbate|zapoc'; then echo "::error::mod errors in log"; exit 1; fi
+          echo "smoke test OK"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: server-log
+          path: server.log
