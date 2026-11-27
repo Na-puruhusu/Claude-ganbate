@@ -16,24 +16,28 @@ jobs:
           java-version: 17
       - uses: gradle/actions/setup-gradle@v4
       - run: chmod +x gradlew
-      - name: Start dedicated server and verify the mod loads
+      - name: Start dedicated server, verify the mod loads and run the in-game self test
+        env:
+          ZAPOC_SELFTEST: "1"
         run: |
           mkdir -p run && echo "eula=true" > run/eula.txt
+          # 平らなワールド(地形に依存しない検証)
+          printf 'level-type=minecraft\\:flat\ngenerate-structures=false\nspawn-protection=0\n' > run/server.properties
           ./gradlew runServer --no-daemon > server.log 2>&1 &
           PID=$!
-          ok=0
-          for i in $(seq 1 240); do
-            if grep -q 'Done (' server.log; then ok=1; break; fi
+          for i in $(seq 1 300); do
             if ! kill -0 $PID 2>/dev/null; then break; fi
-            sleep 5
+            if grep -qE 'ZAPOC_SELFTEST_(OK|FAIL)' server.log; then sleep 10; break; fi
+            sleep 3
           done
-          sleep 5
           pkill -f 'net.minecraftforge.bootstrap' || true
           pkill -f 'gradlew' || true
-          tail -n 60 server.log
-          test $ok -eq 1 || { echo "::error::server did not finish starting"; exit 1; }
+          grep -E 'ZAPOC|SELFTEST|Zombie Apocalypse|Done \(' server.log || true
+          tail -n 40 server.log
+          grep -q 'Done (' server.log || { echo "::error::server did not finish starting"; exit 1; }
           grep -q 'Zombie Apocalypse loaded' server.log || { echo "::error::mod was not loaded"; exit 1; }
-          if grep -E 'ERROR|Exception' server.log | grep -iE 'claudeganbate|zapoc'; then echo "::error::mod errors in log"; exit 1; fi
+          grep -q 'ZAPOC_SELFTEST_OK' server.log || { echo "::error::in-game self test failed or did not finish"; exit 1; }
+          if grep -E 'ERROR|Exception' server.log | grep -iE 'claudeganbate|zapoc' | grep -v 'ZAPOC_SELFTEST_FAIL'; then echo "::error::mod errors in log"; exit 1; fi
           echo "smoke test OK"
       - uses: actions/upload-artifact@v4
         if: always()

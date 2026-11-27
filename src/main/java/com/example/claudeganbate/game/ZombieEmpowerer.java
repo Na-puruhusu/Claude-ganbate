@@ -62,8 +62,17 @@ public final class ZombieEmpowerer {
             return;
         }
         Player near = level.getNearestPlayer(z, 128.0);
-        if (!(near instanceof ServerPlayer sp)) return;   // 周囲にプレイヤーがいなければ後で(次回join時に)処理
+        ServerPlayer sp = near instanceof ServerPlayer n ? n : TEST_PLAYER;   // TEST_PLAYER は自己診断(CI)専用
+        if (sp == null) return;                                               // 周囲にプレイヤーがいなければ次回join時に処理
+        apply(level, z, sp);
+    }
 
+    /** 自己診断(CI)専用: 実プレイヤーがいない専用サーバーで強化処理を検証するための代役。通常はnull。 */
+    public static volatile ServerPlayer TEST_PLAYER = null;
+
+    /** 最寄りプレイヤー sp の脅威レベルでゾンビ z を強化する。 */
+    public static void apply(ServerLevel level, Zombie z, ServerPlayer sp) {
+        CompoundTag tag = z.getPersistentData();
         Tuning tuning = ZapocConfig.tuning();
         double lvl = ThreatTracker.get(sp).threat().statLevel();
 
