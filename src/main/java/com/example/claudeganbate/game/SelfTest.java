@@ -78,6 +78,9 @@ public final class SelfTest {
 
     private static void setup(MinecraftServer server) {
         level = server.overworld();
+        // 日光で燃えてHPが減らないよう夜に固定する(バニラ通りヘルメット無しのゾンビは昼に燃える)
+        level.setDayTime(18000);
+        server.getGameRules().getRule(net.minecraft.world.level.GameRules.RULE_DAYLIGHT).set(false, server);
         fp = FakePlayerFactory.getMinecraft(level);
         BlockPos sp = level.getSharedSpawnPos();
         int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING, sp.getX(), sp.getZ());
