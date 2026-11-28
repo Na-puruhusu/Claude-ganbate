@@ -1,0 +1,131 @@
+{
+  "parent": "minecraft:block/block",
+  "textures": {
+    "particle": "claudeganbate:block/flesh_altar_side",
+    "side": "claudeganbate:block/flesh_altar_side",
+    "top": "claudeganbate:block/flesh_altar_top",
+    "bottom": "claudeganbate:block/flesh_altar_bottom"
+  },
+  "elements": [
+    {
+      "from": [
+        0,
+        0,
+        0
+      ],
+      "to": [
+        16,
+        12,
+        16
+      ],
+      "faces": {
+        "down": {
+          "texture": "#bottom",
+          "cullface": "down"
+        },
+        "up": {
+          "texture": "#top"
+        },
+        "north": {
+          "texture": "#side",
+          "uv": [
+            0,
+            0,
+            16,
+            12
+          ],
+          "cullface": "north"
+        },
+        "south": {
+          "texture": "#side",
+          "uv": [
+            0,
+            0,
+            16,
+            12
+          ],
+          "cullface": "south"
+        },
+        "west": {
+          "texture": "#side",
+          "uv": [
+            0,
+            0,
+            16,
+            12
+          ],
+          "cullface": "west"
+        },
+        "east": {
+          "texture": "#side",
+          "uv": [
+            0,
+            0,
+            16,
+            12
+          ],
+          "cullface": "east"
+        }
+      }
+    },
+    {
+      "from": [
+        3,
+        12,
+        3
+      ],
+      "to": [
+        13,
+        14,
+        13
+      ],
+      "faces": {
+        "up": {
+          "texture": "#top",
+          "uv": [
+            3,
+            3,
+            13,
+            13
+          ]
+        },
+        "north": {
+          "texture": "#top",
+          "uv": [
+            3,
+            0,
+            13,
+            2
+          ]
+        },
+        "south": {
+          "texture": "#top",
+          "uv": [
+            3,
+            0,
+            13,
+            2
+          ]
+        },
+        "west": {
+          "texture": "#top",
+          "uv": [
+            3,
+            0,
+            13,
+            2
+          ]
+        },
+        "east": {
+          "texture": "#top",
+          "uv": [
+            3,
+            0,
+            13,
+            2
+          ]
+        }
+      }
+    }
+  ]
+}

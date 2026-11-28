@@ -1,6 +1,9 @@
 package com.example.claudeganbate.game;
 
 import com.example.claudeganbate.ClaudeGanbate;
+import com.example.claudeganbate.block.AltarBlock;
+import com.example.claudeganbate.block.AltarMenu;
+import com.example.claudeganbate.block.ModBlocks;
 import com.example.claudeganbate.config.ZapocConfig;
 import com.example.claudeganbate.difficulty.DayCurve;
 import com.example.claudeganbate.difficulty.ElixirModel;
@@ -15,6 +18,8 @@ import com.example.claudeganbate.item.ModItems;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.inventory.ContainerLevelAccess;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -82,7 +87,7 @@ public final class SelfTest {
                 case 2 -> { verifyVariants(); spawnHorde(); phase = 3; wait = 40; }
                 case 3 -> { verifyHorde(); killBloater(); phase = 4; wait = 10; }
                 case 4 -> { verifyCloud(); phase = 5; wait = 2; }
-                case 5 -> { testDayBased(); testElixirs(server); testRecipes(server); testAssets(); finish(server); phase = 6; }
+                case 5 -> { testDayBased(); testElixirs(server); testAltar(); testRecipes(server); testAssets(); finish(server); phase = 6; }
                 default -> { }
             }
         } catch (Throwable t) {
@@ -207,45 +212,84 @@ public final class SelfTest {
         ClaudeGanbate.LOGGER.info("SELFTEST day-based threat verified");
     }
 
-    private static void testElixirs(MinecraftServer server) {
+    private static void resetElixirs() {
         for (ElixirModel.Kind k : ElixirModel.Kind.values()) ElixirState.set(fp, k, 0);
         ElixirState.apply(fp);
-        double hp0 = fp.getMaxHealth();
+    }
 
-        // 飲むとレベルが上がり、最大体力が増え、空き瓶が返る
-        ItemStack st = new ItemStack(ModItems.elixir(ElixirModel.Kind.VITALITY, 2));
-        ItemStack out = st.getItem().finishUsingItem(st, level, fp);
-        check(ElixirState.get(fp, ElixirModel.Kind.VITALITY) == 2, "エリクサーを飲んでもレベルが上がらない");
-        check(Math.abs(fp.getMaxHealth() - (hp0 + ElixirModel.maxHpBonus(2))) < 0.01, "活力Lv2の最大体力が不正: " + fp.getMaxHealth());
-        check(out.is(Items.GLASS_BOTTLE), "飲んだ後に空き瓶が返らない");
+    private static void testElixirs(MinecraftServer server) {
+        resetElixirs();
+        double hp0 = fp.getMaxHealth(), spd0 = fp.getAttributeValue(Attributes.MOVEMENT_SPEED);
+        ElixirModel.Kind HEALTH = ElixirModel.Kind.HEALTH;
 
-        // 同じ/低いレベルは飲めない(消費しない)
-        ItemStack st2 = new ItemStack(ModItems.elixir(ElixirModel.Kind.VITALITY, 1));
-        ItemStack out2 = st2.getItem().finishUsingItem(st2, level, fp);
-        check(out2 == st2 && st2.getCount() == 1 && ElixirState.get(fp, ElixirModel.Kind.VITALITY) == 2, "低いレベルのエリクサーを消費してしまった");
+        // 仕様どおりの段階数と効果量
+        check(ElixirModel.FLESH_PER_ELIXIR == 256, "エリクサーは腐肉256個(4スタック)のはず");
+        check(ElixirModel.Kind.DAMAGE.maxLevel() == 4 && ElixirModel.Kind.SPEED.maxLevel() == 4
+            && ElixirModel.Kind.DURABILITY.maxLevel() == 3 && ElixirModel.Kind.HEALTH.maxLevel() == 5, "エリクサーの段階数が仕様と違う");
 
-        // 全種Lv5: 属性に反映される
-        for (ElixirModel.Kind k : ElixirModel.Kind.values()) ElixirState.set(fp, k, 5);
+        // レベルを飛ばして飲めない(消費もしない)
+        ItemStack skip = new ItemStack(ModItems.elixir(HEALTH, 2));
+        ItemStack outSkip = skip.getItem().finishUsingItem(skip, level, fp);
+        check(ElixirState.get(fp, HEALTH) == 0 && outSkip == skip && skip.getCount() == 1, "体力Lv1を飲まずにLv2を飲めてしまった");
+
+        // 体力: Lv1〜5 を順に飲む → ハート +2/4/6/8/10(= HP +4/8/12/16/20)
+        for (int lv = 1; lv <= 5; lv++) {
+            ItemStack st = new ItemStack(ModItems.elixir(HEALTH, lv));
+            ItemStack out = st.getItem().finishUsingItem(st, level, fp);
+            check(ElixirState.get(fp, HEALTH) == lv, "体力エリクサーLv" + lv + "を飲んでもレベルが上がらない");
+            check(out.isEmpty(), "飲んだエリクサーが消費されない Lv" + lv);
+            check(Math.abs(fp.getMaxHealth() - (hp0 + 4.0 * lv)) < 0.01, "体力Lv" + lv + "の最大体力が不正: " + fp.getMaxHealth() + " (期待 " + (hp0 + 4.0 * lv) + ")");
+        }
+        // 同じレベルは飲めない(消費しない)
+        ItemStack again = new ItemStack(ModItems.elixir(HEALTH, 3));
+        ItemStack outAgain = again.getItem().finishUsingItem(again, level, fp);
+        check(outAgain == again && again.getCount() == 1 && ElixirState.get(fp, HEALTH) == 5, "低いレベルのエリクサーを消費してしまった");
+
+        // 全種最大: 体力+20 / スピード+100%
+        for (ElixirModel.Kind k : ElixirModel.Kind.values()) ElixirState.set(fp, k, k.maxLevel());
         ElixirState.apply(fp);
-        check(Math.abs(fp.getMaxHealth() - (20.0 + 10.0)) < 0.01, "全種Lv5の最大体力 != 30: " + fp.getMaxHealth());
-        check(Math.abs(fp.getAttributeValue(Attributes.ATTACK_DAMAGE) - (1.0 + 4.0)) < 0.01, "凶暴Lv5の攻撃力が不正: " + fp.getAttributeValue(Attributes.ATTACK_DAMAGE));
-        check(Math.abs(fp.getAttributeValue(Attributes.MOVEMENT_SPEED) / 0.1 - 1.2) < 0.01, "俊足Lv5の速度倍率が不正: " + fp.getAttributeValue(Attributes.MOVEMENT_SPEED) / 0.1);
-        check(Math.abs(fp.getAttributeValue(Attributes.ARMOR) - 5.0) < 0.01, "頑強Lv5の防御が不正: " + fp.getAttributeValue(Attributes.ARMOR));
-        check(Math.abs(fp.getAttributeValue(Attributes.KNOCKBACK_RESISTANCE) - 0.3) < 0.01, "頑強Lv5のKB耐性が不正");
+        check(Math.abs(fp.getMaxHealth() - (hp0 + 20.0)) < 0.01, "全種最大の最大体力が不正: " + fp.getMaxHealth());
+        check(Math.abs(fp.getAttributeValue(Attributes.MOVEMENT_SPEED) / spd0 - 2.0) < 0.01, "スピード最大で移動速度が2倍にならない: " + fp.getAttributeValue(Attributes.MOVEMENT_SPEED) / spd0);
         ElixirState.apply(fp);   // 冪等(二重に積まれない)
-        check(Math.abs(fp.getMaxHealth() - 30.0) < 0.01, "apply を繰り返すと効果が重複する");
+        check(Math.abs(fp.getMaxHealth() - (hp0 + 20.0)) < 0.01 && Math.abs(fp.getAttributeValue(Attributes.MOVEMENT_SPEED) / spd0 - 2.0) < 0.01, "apply を繰り返すと効果が重複する");
+        // 段階ごとのスピード: 25/50/75/100%
+        for (int lv = 1; lv <= 4; lv++) {
+            ElixirState.set(fp, ElixirModel.Kind.SPEED, lv);
+            ElixirState.apply(fp);
+            check(Math.abs(fp.getAttributeValue(Attributes.MOVEMENT_SPEED) / spd0 - (1.0 + 0.25 * lv)) < 0.01, "スピードLv" + lv + "の倍率が不正");
+        }
+        ElixirState.set(fp, ElixirModel.Kind.SPEED, 4);
+        ElixirState.apply(fp);
+
+        // ダメージ(与ダメージ +15/30/45/60%)と耐久(被ダメージ -20/40/60%)
+        Zombie target = EntityType.ZOMBIE.create(level);
+        double[] dmgBonus = {0.15, 0.30, 0.45, 0.60}, durCut = {0.20, 0.40, 0.60};
+        for (int lv = 0; lv <= 4; lv++) {
+            ElixirState.set(fp, ElixirModel.Kind.DAMAGE, lv);
+            float got = ElixirEvents.modifyDamage(target, fp.damageSources().playerAttack(fp), 10f);
+            double want = 10.0 * (1.0 + (lv == 0 ? 0 : dmgBonus[lv - 1]));
+            check(Math.abs(got - want) < 0.01, "ダメージLv" + lv + "の与ダメージ " + got + " != " + want);
+        }
+        for (int lv = 0; lv <= 3; lv++) {
+            ElixirState.set(fp, ElixirModel.Kind.DURABILITY, lv);
+            float got = ElixirEvents.modifyDamage(fp, fp.damageSources().mobAttack(target), 10f);
+            double want = 10.0 * (1.0 - (lv == 0 ? 0 : durCut[lv - 1]));
+            check(Math.abs(got - want) < 0.01, "耐久Lv" + lv + "の被ダメージ " + got + " != " + want);
+        }
+        check(Math.abs(ElixirEvents.modifyDamage(fp, fp.damageSources().genericKill(), 10f) - 10f) < 0.01, "耐久が /kill などの無視できないダメージまで軽減している");
+        check(Math.abs(ElixirEvents.modifyDamage(target, fp.damageSources().generic(), 10f) - 10f) < 0.01, "プレイヤー以外の攻撃者のダメージが変わっている");
 
         // 死亡・帰還を想定した引き継ぎ
         Player fp2 = FakePlayerFactory.get(level, new GameProfile(UUID.nameUUIDFromBytes("zapoc_test2".getBytes(StandardCharsets.UTF_8)), "zapoc_test2"));
         ElixirState.copy(fp, fp2);
         ElixirState.apply(fp2);
-        check(ElixirState.get(fp2, ElixirModel.Kind.RESILIENCE) == 5 && Math.abs(fp2.getMaxHealth() - 30.0) < 0.01, "死亡後の引き継ぎでエリクサーが消えた");
+        check(ElixirState.get(fp2, ElixirModel.Kind.DURABILITY) == 3 && Math.abs(fp2.getMaxHealth() - (hp0 + 20.0)) < 0.01, "死亡後の引き継ぎでエリクサーが消えた");
 
-        // エリクサーを飲んだ分、脅威(DDA)が上がる(強くなるほど少し厳しくなる)
+        // エリクサーを持つほどDDAで少し厳しくなる(標準より多く持つと補正が正)
         ThreatTracker.setOverride(fp.getUUID(), null);
         ThreatTracker.invalidate(fp.getUUID());
         double adj = ThreatTracker.get(fp).threat().adj();
-        check(adj > 0.0, "エリクサーで強くなってもDDAの補正が上がらない: " + adj);
+        check(adj > 0.0, "エリクサー全部でもDDAの補正が上がらない: " + adj);
         ThreatTracker.setOverride(fp.getUUID(), 8.0);
 
         // 腐肉ドロップ
@@ -253,68 +297,131 @@ public final class SelfTest {
         alpha.getPersistentData().putBoolean(ZombieEmpowerer.TAG_DONE, true);
         alpha.getPersistentData().putString(ZombieEmpowerer.TAG_VARIANT, "alpha");
         alpha.getPersistentData().putDouble(ZombieEmpowerer.TAG_LEVEL, 8.0);
-        check(ElixirEvents.extraFlesh(alpha, 0, new Random(3)) >= 6, "アルファの追加腐肉ドロップが少ない");
-        for (ElixirModel.Kind k : ElixirModel.Kind.values()) ElixirState.set(fp, k, 0);
-        ElixirState.apply(fp);
+        check(ElixirEvents.extraFlesh(alpha, 0, new Random(3)) >= 8, "アルファの追加腐肉ドロップが少ない");
+        resetElixirs();
         ClaudeGanbate.LOGGER.info("SELFTEST elixirs verified");
+    }
+
+    private static void giveFlesh(int n) {
+        for (int left = n; left > 0; left -= 64) fp.getInventory().add(new ItemStack(Items.ROTTEN_FLESH, Math.min(64, left)));
+    }
+
+    /** 祭壇でのクラフト: 腐肉256個、次のレベルだけ、重複所持の拒否、画面のクリック処理。 */
+    private static void testAltar() {
+        resetElixirs();
+        fp.getInventory().clearContent();
+        ElixirModel.Kind DMG = ElixirModel.Kind.DAMAGE;
+
+        giveFlesh(255);
+        check(AltarCrafting.craft(fp, DMG, 1) == AltarCrafting.Result.NOT_ENOUGH_FLESH && AltarCrafting.countFlesh(fp.getInventory()) == 255, "腐肉255個で作れてしまった/消費された");
+        giveFlesh(1);
+        check(AltarCrafting.craft(fp, DMG, 2) == AltarCrafting.Result.NEED_PREVIOUS && AltarCrafting.countFlesh(fp.getInventory()) == 256, "Lv1を飛ばしてLv2を作れてしまった");
+        check(AltarCrafting.craft(fp, DMG, 5) == AltarCrafting.Result.INVALID && AltarCrafting.craft(fp, ElixirModel.Kind.DURABILITY, 4) == AltarCrafting.Result.INVALID, "存在しないレベルを作れてしまった");
+        check(AltarCrafting.craft(fp, DMG, 1) == AltarCrafting.Result.OK, "腐肉256個(4スタック)で作れない");
+        check(AltarCrafting.countFlesh(fp.getInventory()) == 0, "作成後に腐肉が残っている/足りない: " + AltarCrafting.countFlesh(fp.getInventory()));
+        check(AltarCrafting.holds(fp.getInventory(), ModItems.elixir(DMG, 1)), "作ったエリクサーが渡されていない");
+        giveFlesh(256);
+        check(AltarCrafting.craft(fp, DMG, 1) == AltarCrafting.Result.ALREADY_HELD && AltarCrafting.countFlesh(fp.getInventory()) == 256, "同じエリクサーを持っているのに重複して作れてしまう");
+        // 飲む → 習得済みになり、次のレベルが作れる
+        ItemStack drink = new ItemStack(ModItems.elixir(DMG, 1));
+        drink.getItem().finishUsingItem(drink, level, fp);
+        check(AltarCrafting.craft(fp, DMG, 1) == AltarCrafting.Result.ALREADY_LEARNED, "習得済みのレベルを作れてしまう");
+
+        // 画面(メニュー): 行=種類、列=レベル。表示専用で、クリックで作る
+        AltarMenu menu = new AltarMenu(1, fp.getInventory(), ContainerLevelAccess.NULL);
+        check(menu.slots.size() == AltarMenu.SIZE + 36, "祭壇画面のスロット数が不正: " + menu.slots.size());
+        check(menu.getSlot(0).getItem().is(Items.IRON_SWORD), "ダメージ行の見出しが不正");
+        check(menu.getSlot(1).getItem().is(ModItems.elixir(DMG, 1)), "習得済みのLv1が表示されない");
+        check(menu.getSlot(2).getItem().is(ModItems.elixir(DMG, 2)), "次に作れるLv2が表示されない");
+        check(menu.getSlot(3).getItem().is(Items.GRAY_STAINED_GLASS_PANE), "未解放のLv3がロック表示でない");
+        check(menu.getSlot(4).getItem().is(ModItems.elixir(DMG, 4)) || menu.getSlot(4).getItem().is(Items.GRAY_STAINED_GLASS_PANE), "ダメージLv4の表示が不正");
+        check(menu.getSlot(9 * 3 + 5).getItem().is(Items.GRAY_STAINED_GLASS_PANE), "体力Lv5(未解放)がロック表示でない");
+        check(menu.getSlot(9 * 2 + 4).getItem().isEmpty(), "耐久は3段階のはず(Lv4のスロットは空)");
+        check(menu.getSlot(AltarMenu.INFO_SLOT).getItem().is(Items.ROTTEN_FLESH), "腐肉の所持数の表示が無い");
+        check(!menu.getSlot(2).mayPickup(fp) && !menu.getSlot(2).mayPlace(new ItemStack(Items.DIAMOND)), "表示スロットから取り出し/設置できてしまう");
+        check(menu.quickMoveStack(fp, 0).isEmpty(), "シフトクリックで何かが動いた");
+        // 腐肉256個(さっき渡した分)。ダメージLv2は既に持っている(作成済み)ので、体力Lv1(スロット28)をクリックして作る
+        int before = AltarCrafting.countFlesh(fp.getInventory());
+        menu.clicked(9 * 3 + 1, 0, ClickType.PICKUP, fp);
+        check(AltarCrafting.holds(fp.getInventory(), ModItems.elixir(ElixirModel.Kind.HEALTH, 1)), "画面のクリックでエリクサーが作れない");
+        check(AltarCrafting.countFlesh(fp.getInventory()) == before - 256, "画面で作ったときの腐肉消費が不正");
+        check(menu.getCarried().isEmpty(), "画面のクリックでアイテムを持ててしまった");
+        // 腐肉が足りないときは何も起きない
+        int flesh = AltarCrafting.countFlesh(fp.getInventory());
+        menu.clicked(9 + 1, 0, ClickType.PICKUP, fp);   // スピードLv1
+        check(!AltarCrafting.holds(fp.getInventory(), ModItems.elixir(ElixirModel.Kind.SPEED, 1)) || flesh >= 256, "腐肉不足でも作れてしまった");
+
+        // ブロック: 置いて右クリックすると画面が開く
+        BlockPos pos = fp.blockPosition().offset(4, 0, 4);
+        level.setBlockAndUpdate(pos, ModBlocks.FLESH_ALTAR.get().defaultBlockState());
+        check(level.getBlockState(pos).getBlock() instanceof AltarBlock, "祭壇ブロックを置けない");
+        var hit = new net.minecraft.world.phys.BlockHitResult(net.minecraft.world.phys.Vec3.atCenterOf(pos), net.minecraft.core.Direction.UP, pos, false);
+        var res = level.getBlockState(pos).use(level, fp, net.minecraft.world.InteractionHand.MAIN_HAND, hit);
+        check(res.consumesAction() && fp.containerMenu instanceof AltarMenu, "祭壇を右クリックしても画面が開かない");
+        fp.closeContainer();
+        level.setBlockAndUpdate(pos, net.minecraft.world.level.block.Blocks.AIR.defaultBlockState());
+
+        fp.getInventory().clearContent();
+        resetElixirs();
+        ClaudeGanbate.LOGGER.info("SELFTEST altar verified");
     }
 
     private static void testRecipes(MinecraftServer server) {
         var ra = server.registryAccess();
         var all = server.getRecipeManager().getAllRecipesFor(RecipeType.CRAFTING).stream()
             .filter(r -> r.getId().getNamespace().equals(ClaudeGanbate.MODID)).toList();
-        check(all.size() == 1 + ElixirModel.Kind.values().length * ElixirModel.MAX_LEVEL, "mod のレシピ数が不正: " + all.size());
-
-        Item essence = ModItems.PUTRID_ESSENCE.get();
-        CraftingRecipe er = all.stream().filter(r -> r.getResultItem(ra).is(essence)).findFirst().orElse(null);
-        check(er != null && er.getIngredients().size() == ElixirModel.FLESH_PER_ESSENCE
-            && er.getIngredients().stream().allMatch(i -> i.test(new ItemStack(Items.ROTTEN_FLESH))), "腐肉のエッセンスのレシピが不正");
-
-        for (ElixirModel.Kind k : ElixirModel.Kind.values()) {
-            Item catalyst = ForgeRegistries.ITEMS.getValue(new ResourceLocation(k.catalyst));
-            for (int lv = 1; lv <= ElixirModel.MAX_LEVEL; lv++) {
-                Item result = ModItems.elixir(k, lv);
-                CraftingRecipe r = all.stream().filter(x -> x.getResultItem(ra).is(result)).findFirst().orElse(null);
-                String name = k.id + " Lv" + lv;
-                if (r == null) { check(false, name + " のレシピが無い"); continue; }
-                Item base = lv == 1 ? Items.GLASS_BOTTLE : ModItems.elixir(k, lv - 1);
-                int nEss = 0, nCat = 0, nBase = 0;
-                for (Ingredient ing : r.getIngredients()) {
-                    if (ing.test(new ItemStack(essence))) nEss++;
-                    else if (ing.test(new ItemStack(catalyst))) nCat++;
-                    else if (ing.test(new ItemStack(base))) nBase++;
-                }
-                check(nEss == ElixirModel.essenceCost(lv), name + " のエッセンス数 " + nEss + " != " + ElixirModel.essenceCost(lv));
-                check(nCat == ElixirModel.catalystCost(lv), name + " の触媒数 " + nCat + " != " + ElixirModel.catalystCost(lv));
-                check(nBase == 1 && r.getIngredients().size() == nEss + nCat + nBase, name + " のレシピ構成が不正");
-            }
+        // エリクサーは祭壇で作る(クラフト台のレシピは祭壇だけ)
+        check(all.size() == 1, "mod のレシピ数が不正(祭壇の1つだけのはず): " + all.size());
+        CraftingRecipe r = all.stream().filter(x -> x.getResultItem(ra).is(ModItems.FLESH_ALTAR.get())).findFirst().orElse(null);
+        if (r == null) { check(false, "腐肉の祭壇のレシピが無い"); return; }
+        int flesh = 0, bone = 0, cauldron = 0, bricks = 0;
+        for (Ingredient ing : r.getIngredients()) {
+            if (ing.test(new ItemStack(Items.ROTTEN_FLESH))) flesh++;
+            else if (ing.test(new ItemStack(Items.BONE))) bone++;
+            else if (ing.test(new ItemStack(Items.CAULDRON))) cauldron++;
+            else if (ing.test(new ItemStack(Items.STONE_BRICKS))) bricks++;
         }
+        check(flesh == 3 && bone == 2 && cauldron == 1 && bricks == 3, "腐肉の祭壇のレシピ構成が不正: " + flesh + "," + bone + "," + cauldron + "," + bricks);
         ClaudeGanbate.LOGGER.info("SELFTEST recipes verified: {}", all.size());
     }
 
-    /** アイテムの登録・モデル・テクスチャ・言語ファイル(日英)が全部そろっているか。 */
+    /** アイテム・ブロックの登録・モデル・テクスチャ・言語ファイル(日英)が全部そろっているか。 */
     private static void testAssets() {
+        String ns = ClaudeGanbate.MODID;
         java.util.List<String> ids = new java.util.ArrayList<>();
-        ids.add("putrid_essence");
-        for (ElixirModel.Kind k : ElixirModel.Kind.values()) for (int lv = 1; lv <= ElixirModel.MAX_LEVEL; lv++) ids.add("elixir_" + k.id + "_" + lv);
+        for (ElixirModel.Kind k : ElixirModel.Kind.values()) for (int lv = 1; lv <= k.maxLevel(); lv++) ids.add("elixir_" + k.id + "_" + lv);
+        check(ids.size() == ElixirModel.TOTAL_ELIXIRS, "エリクサーの種類数が不正: " + ids.size());
         for (String id : ids) {
-            check(ForgeRegistries.ITEMS.getValue(new ResourceLocation(ClaudeGanbate.MODID, id)) != Items.AIR, "アイテム未登録: " + id);
-            check(exists("/assets/" + ClaudeGanbate.MODID + "/models/item/" + id + ".json"), "モデルが無い: " + id);
-            check(exists("/assets/" + ClaudeGanbate.MODID + "/textures/item/" + id + ".png"), "テクスチャが無い: " + id);
+            check(ForgeRegistries.ITEMS.getValue(new ResourceLocation(ns, id)) != Items.AIR, "アイテム未登録: " + id);
+            check(exists("/assets/" + ns + "/models/item/" + id + ".json"), "モデルが無い: " + id);
+            check(exists("/assets/" + ns + "/textures/item/" + id + ".png"), "テクスチャが無い: " + id);
         }
+        // 祭壇(ブロック+アイテム)
+        check(ForgeRegistries.BLOCKS.getValue(new ResourceLocation(ns, "flesh_altar")) instanceof AltarBlock, "祭壇ブロックが未登録");
+        check(ForgeRegistries.ITEMS.getValue(new ResourceLocation(ns, "flesh_altar")) instanceof net.minecraft.world.item.BlockItem, "祭壇のブロックアイテムが未登録");
+        for (String path : new String[]{"/assets/" + ns + "/blockstates/flesh_altar.json", "/assets/" + ns + "/models/block/flesh_altar.json",
+            "/assets/" + ns + "/models/item/flesh_altar.json", "/assets/" + ns + "/textures/block/flesh_altar_side.png",
+            "/assets/" + ns + "/textures/block/flesh_altar_top.png", "/assets/" + ns + "/textures/block/flesh_altar_bottom.png",
+            "/data/" + ns + "/loot_tables/blocks/flesh_altar.json", "/data/" + ns + "/recipes/flesh_altar.json",
+            "/data/minecraft/tags/blocks/mineable/pickaxe.json"})
+            check(exists(path), "祭壇のファイルが無い: " + path);
+        java.util.List<String> keys = new java.util.ArrayList<>(java.util.List.of("zapoc.dawn", "zapoc.levelup", "zapoc.horde.warning", "zapoc.horde.wave", "zapoc.horde.dawn", "zapoc.horde.cleared",
+            "zapoc.horde.reward", "zapoc.sleep.blocked", "zapoc.elixir.drunk", "zapoc.elixir.already", "tooltip.claudeganbate.permanent", "tooltip.claudeganbate.level",
+            "block." + ns + ".flesh_altar", "container." + ns + ".flesh_altar", "tooltip.claudeganbate.altar.1", "tooltip.claudeganbate.altar.2",
+            "zapoc.altar.current", "zapoc.altar.locked", "zapoc.altar.locked.hint", "zapoc.altar.learned", "zapoc.altar.click", "zapoc.altar.cost",
+            "zapoc.altar.flesh", "zapoc.altar.info.1", "zapoc.altar.info.2", "zapoc.altar.made", "zapoc.altar.noflesh", "zapoc.altar.held"));
         for (String lang : new String[]{"en_us", "ja_jp"}) {
-            JsonObject json = readJson("/assets/" + ClaudeGanbate.MODID + "/lang/" + lang + ".json");
+            JsonObject json = readJson("/assets/" + ns + "/lang/" + lang + ".json");
             if (json == null) { check(false, "言語ファイルが読めない: " + lang); continue; }
-            for (String id : ids) check(json.has("item." + ClaudeGanbate.MODID + "." + id), lang + " に item." + id + " の名前が無い");
+            for (String id : ids) check(json.has("item." + ns + "." + id), lang + " に item." + id + " の名前が無い");
+            check(json.has("item." + ns + ".flesh_altar") || json.has("block." + ns + ".flesh_altar"), lang + " に祭壇の名前が無い");
             for (ElixirModel.Kind k : ElixirModel.Kind.values()) {
-                check(json.has("tooltip." + ClaudeGanbate.MODID + "." + k.id), lang + " に tooltip." + k.id + " が無い");
+                check(json.has("tooltip." + ns + "." + k.id), lang + " に tooltip." + k.id + " が無い");
                 check(json.has("zapoc.elixir.kind." + k.id), lang + " に zapoc.elixir.kind." + k.id + " が無い");
             }
-            for (String key : new String[]{"zapoc.dawn", "zapoc.levelup", "zapoc.horde.warning", "zapoc.horde.wave", "zapoc.horde.dawn", "zapoc.horde.cleared",
-                "zapoc.horde.reward", "zapoc.sleep.blocked", "zapoc.elixir.drunk", "zapoc.elixir.already", "tooltip.claudeganbate.permanent", "tooltip.claudeganbate.level"})
-                check(json.has(key), lang + " に " + key + " が無い");
+            for (String key : keys) check(json.has(key), lang + " に " + key + " が無い");
         }
-        ClaudeGanbate.LOGGER.info("SELFTEST assets verified: {} items", ids.size());
+        ClaudeGanbate.LOGGER.info("SELFTEST assets verified: {} elixirs + altar", ids.size());
     }
 
     private static boolean exists(String path) { return SelfTest.class.getResource(path) != null; }

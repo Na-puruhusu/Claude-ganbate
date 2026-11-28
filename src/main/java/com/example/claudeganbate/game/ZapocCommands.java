@@ -56,10 +56,10 @@ public final class ZapocCommands {
             }))
             .then(Commands.literal("elixir").requires(s -> s.hasPermission(2))
                 .then(Commands.argument("kind", StringArgumentType.word())
-                    .then(Commands.argument("level", IntegerArgumentType.integer(0, ElixirModel.MAX_LEVEL)).executes(c -> {
+                    .then(Commands.argument("level", IntegerArgumentType.integer(0, 5)).executes(c -> {
                         ServerPlayer p = c.getSource().getPlayerOrException();
                         ElixirModel.Kind k = ElixirModel.Kind.byId(StringArgumentType.getString(c, "kind"));
-                        if (k == null) return msg(c.getSource(), "kind は vitality / ferocity / fleetfoot / resilience のどれか");
+                        if (k == null) return msg(c.getSource(), "kind は damage / speed / durability / health のどれか");
                         ElixirState.set(p, k, IntegerArgumentType.getInteger(c, "level"));
                         ElixirState.apply(p);
                         return msg(c.getSource(), k.id + " を Lv" + ElixirState.get(p, k) + " にしました");
@@ -95,21 +95,20 @@ public final class ZapocCommands {
     }
 
     private static int potions(CommandSourceStack s, ServerPlayer p) {
-        StringBuilder sb = new StringBuilder("§6== 永続エリクサー ==§r\n");
+        StringBuilder sb = new StringBuilder("§6== 永続エリクサー(腐肉の祭壇で作る。1個 = 腐肉" + ElixirModel.FLESH_PER_ELIXIR + "個) ==§r\n");
         for (ElixirModel.Kind k : ElixirModel.Kind.values()) {
             int lv = ElixirState.get(p, k);
-            sb.append(String.format("%s Lv%d/%d  ", Component.translatable("zapoc.elixir.kind." + k.id).getString(), lv, ElixirModel.MAX_LEVEL));
+            sb.append(String.format("%s Lv%d/%d  ", Component.translatable("zapoc.elixir.kind." + k.id).getString(), lv, k.maxLevel()));
             switch (k) {
-                case VITALITY -> sb.append(String.format("最大体力 +%.0f%n", ElixirModel.maxHpBonus(lv)));
-                case FEROCITY -> sb.append(String.format("攻撃力 +%.1f%n", ElixirModel.attackBonus(lv)));
-                case FLEETFOOT -> sb.append(String.format("移動速度 +%.0f%%%n", ElixirModel.speedBonus(lv) * 100));
-                case RESILIENCE -> sb.append(String.format("防御 +%.0f / KB耐性 +%.0f%%%n", ElixirModel.armorBonus(lv), ElixirModel.kbResistBonus(lv) * 100));
+                case DAMAGE -> sb.append(String.format("与ダメージ +%.0f%%%n", k.value(lv) * 100));
+                case SPEED -> sb.append(String.format("移動速度 +%.0f%%%n", k.value(lv) * 100));
+                case DURABILITY -> sb.append(String.format("被ダメージ -%.0f%%%n", k.value(lv) * 100));
+                case HEALTH -> sb.append(String.format("最大体力 +%.0fハート%n", k.value(lv)));
             }
         }
-        sb.append(String.format("§7作り方: 腐肉%d個→エッセンス1個。Lv1=空き瓶+エッセンス%d+触媒、以降は前のLvの薬+エッセンス+触媒%n",
-            ElixirModel.FLESH_PER_ESSENCE, ElixirModel.essenceCost(1)));
-        sb.append("§7触媒: ");
-        for (ElixirModel.Kind k : ElixirModel.Kind.values()) sb.append(k.id).append("=").append(k.catalyst.replace("minecraft:", "")).append("  ");
+        ElixirModel.Levels lv = ElixirState.levels(p);
+        sb.append(String.format("§7合計 %d/%d個。次のレベルだけ作れる。所持腐肉 %d個(1個作るのに %d個)",
+            lv.total(), ElixirModel.TOTAL_ELIXIRS, AltarCrafting.countFlesh(p.getInventory()), ElixirModel.FLESH_PER_ELIXIR));
         String text = sb.toString();
         s.sendSuccess(() -> Component.literal(text), false);
         return 1;
@@ -132,6 +131,9 @@ public final class ZapocCommands {
         sb.append(String.format("装備: 最大体力%.0f 防御%.0f 強靭%.0f 防護EPF%.0f 対ゾンビ攻撃%.1f / この日数の標準 防御%.0f 攻撃%.1f%n",
             in.maxHp(), in.armor(), in.toughness(), in.epf(), in.attack(),
             Curve.at(GearBench.ARMOR, th.progress()), Curve.at(GearBench.ATTACK, th.progress())));
+        sb.append(String.format("エリクサー: %d個(この日数の標準 約%.0f個) ダメージ+%.0f%% 耐久-%.0f%% スピード+%.0f%%%n",
+            in.elixirs().total(), Curve.at(java.util.stream.IntStream.of(GearBench.STANDARD_ELIXIRS).asDoubleStream().toArray(), th.progress()),
+            (in.elixirs().damageMult() - 1) * 100, (1 - in.elixirs().takenMult()) * 100, in.elixirs().speedBonus() * 100));
         ZombieProfile w = ZombieProfile.of(th.statLevel(), Variant.WALKER, t);
         ZombieProfile b = ZombieProfile.of(th.statLevel(), Variant.BRUTE, t);
         sb.append(String.format("ゾンビ: HP%.0f 攻撃%.1f 速度x%.2f 防御%.1f | ブルート HP%.0f 攻撃%.1f%n", w.maxHp(), w.damage(), w.speedMult(), w.armor(), b.maxHp(), b.damage()));

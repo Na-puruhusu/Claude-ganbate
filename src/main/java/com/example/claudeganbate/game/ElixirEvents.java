@@ -3,8 +3,12 @@ package com.example.claudeganbate.game;
 import com.example.claudeganbate.ClaudeGanbate;
 import com.example.claudeganbate.config.ZapocConfig;
 import com.example.claudeganbate.difficulty.ElixirModel;
+import com.example.claudeganbate.difficulty.ElixirModel.Levels;
 import com.example.claudeganbate.difficulty.Variant;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.tags.DamageTypeTags;
+import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.monster.Zombie;
 import net.minecraft.world.entity.monster.ZombifiedPiglin;
@@ -12,13 +16,14 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraftforge.event.entity.living.LivingDropsEvent;
+import net.minecraftforge.event.entity.living.LivingHurtEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
 import java.util.Random;
 
-/** エリクサーの永続化(ログイン・死亡・帰還で効果を維持)と、腐肉の追加ドロップ。 */
+/** エリクサーの永続化(ログイン・死亡・帰還で効果を維持)、ダメージ/耐久の効果、腐肉の追加ドロップ。 */
 @Mod.EventBusSubscriber(modid = ClaudeGanbate.MODID)
 public final class ElixirEvents {
     private ElixirEvents() {}
@@ -40,6 +45,29 @@ public final class ElixirEvents {
     public static void onRespawn(PlayerEvent.PlayerRespawnEvent e) {
         ElixirState.apply(e.getEntity());
         e.getEntity().setHealth(e.getEntity().getMaxHealth());
+    }
+
+    /** ダメージ(与ダメージ増加)と耐久(被ダメージ軽減)。防具の軽減より前に掛かるので、防具とは掛け算で効く。 */
+    @SubscribeEvent
+    public static void onHurt(LivingHurtEvent e) {
+        LivingEntity victim = e.getEntity();
+        if (victim.level().isClientSide()) return;
+        e.setAmount(modifyDamage(victim, e.getSource(), e.getAmount()));
+    }
+
+    /** onHurt の中身(自己診断からも呼ぶ)。 */
+    public static float modifyDamage(LivingEntity victim, DamageSource src, float amount) {
+        if (!ZapocConfig.ENABLED.get()) return amount;
+        float a = amount;
+        if (src.getEntity() instanceof Player attacker && attacker != victim) {
+            Levels lv = ElixirState.levels(attacker);
+            if (lv.damage() > 0) a *= (float) lv.damageMult();
+        }
+        if (victim instanceof Player pl && !src.is(DamageTypeTags.BYPASSES_INVULNERABILITY)) {
+            Levels lv = ElixirState.levels(pl);
+            if (lv.durability() > 0) a *= (float) lv.takenMult();
+        }
+        return a;
     }
 
     /** プレイヤーが倒したゾンビから腐肉を追加で落とす。脅威レベルが高く、強い個体ほど多い。 */

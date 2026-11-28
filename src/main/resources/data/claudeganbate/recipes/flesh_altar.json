@@ -1,0 +1,26 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "F": {
+      "item": "minecraft:rotten_flesh"
+    },
+    "B": {
+      "item": "minecraft:bone"
+    },
+    "C": {
+      "item": "minecraft:cauldron"
+    },
+    "S": {
+      "item": "minecraft:stone_bricks"
+    }
+  },
+  "pattern": [
+    "FFF",
+    "BCB",
+    "SSS"
+  ],
+  "result": {
+    "item": "claudeganbate:flesh_altar"
+  }
+}

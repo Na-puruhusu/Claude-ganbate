@@ -1,7 +1,6 @@
 package com.example.claudeganbate.game;
 
 import com.example.claudeganbate.config.ZapocConfig;
-import com.example.claudeganbate.difficulty.ElixirModel;
 import com.example.claudeganbate.difficulty.ThreatCalculator;
 import com.example.claudeganbate.difficulty.ThreatCalculator.Inputs;
 import com.example.claudeganbate.difficulty.ThreatCalculator.Threat;
@@ -56,12 +55,12 @@ public final class ThreatTracker {
 
     private static Snapshot compute(ServerPlayer p, long now) {
         double day = worldDay(p);
-        // 防御・最大体力は属性から読む(エリクサー・装備・エンチャントの効果を含む)
+        // 防御・最大体力は属性から読む(体力エリクサー・装備・エンチャントの効果を含む)
         double armor = p.getAttributeValue(Attributes.ARMOR);
         double tough = p.getAttributeValue(Attributes.ARMOR_TOUGHNESS);
         int epf = EnchantmentHelper.getDamageProtection(p.getArmorSlots(), p.damageSources().generic());
-        double attack = bestMeleeVsUndead(p) + ElixirModel.attackBonus(ElixirState.get(p, ElixirModel.Kind.FEROCITY));
-        Inputs in = new Inputs(day, p.getMaxHealth(), armor, tough, epf, attack);
+        double attack = bestMeleeVsUndead(p);                       // 素の武器ダメージ。ダメージエリクサーは elixirs から掛ける
+        Inputs in = new Inputs(day, p.getMaxHealth(), armor, tough, epf, attack, ElixirState.levels(p));
 
         Threat th = ThreatCalculator.compute(in, ZapocConfig.tuning());
         Double ov = OVERRIDE.get(p.getUUID());

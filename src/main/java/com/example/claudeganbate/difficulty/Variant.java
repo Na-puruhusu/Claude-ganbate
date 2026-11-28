@@ -14,7 +14,7 @@ public enum Variant {
     ARMORED ("armored", 1.00, 1.00, 0.97, 7,   0.1,  new double[]{0,0,0,8,12,16,18,20,20,20,20,20}),
     BRUTE   ("brute",   2.20, 1.45, 0.86, 2,   0.45,  new double[]{0,0,0,0,4,7,9,11,13,14,15,15}),
     BLOATER ("bloater", 1.40, 0.60, 0.92, 0,   0.0,  new double[]{0,0,0,0,0,4,6,8,9,10,10,10}),
-    ALPHA   ("alpha",   2.80, 1.30, 1.00, 4,   0.35,  new double[]{0,0,0,0,0,0,0,0,0,0,0,0});
+    ALPHA   ("alpha",   3.30, 1.30, 1.00, 4,   0.35,  new double[]{0,0,0,0,0,0,0,0,0,0,0,0});
 
     /** ALPHA のオーラ(耐性効果I=被ダメージ20%軽減)。Forge側と同じ値。 */
     public static final double AURA_DAMAGE_REDUCTION = 0.20;

@@ -1,7 +1,9 @@
 package com.example.claudeganbate.item;
 
 import com.example.claudeganbate.ClaudeGanbate;
+import com.example.claudeganbate.block.ModBlocks;
 import com.example.claudeganbate.difficulty.ElixirModel;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraft.world.item.Item;
 import net.minecraftforge.event.BuildCreativeModeTabContentsEvent;
@@ -17,15 +19,16 @@ public final class ModItems {
 
     public static final DeferredRegister<Item> ITEMS = DeferredRegister.create(ForgeRegistries.ITEMS, ClaudeGanbate.MODID);
 
-    /** 腐肉のエッセンス: 腐肉9個を凝縮したもの。エリクサーの主材料。 */
-    public static final RegistryObject<Item> PUTRID_ESSENCE = ITEMS.register("putrid_essence", () -> new Item(new Item.Properties()));
+    /** 腐肉の祭壇(ブロックアイテム)。エリクサーはこの台で作る。 */
+    public static final RegistryObject<Item> FLESH_ALTAR = ITEMS.register("flesh_altar",
+        () -> new BlockItem(ModBlocks.FLESH_ALTAR.get(), new Item.Properties()));
 
-    /** key = "<kind>_<level>" (例: vitality_3) */
+    /** key = "<kind>_<level>" (例: health_3)。全16種類。 */
     public static final Map<String, RegistryObject<Item>> ELIXIRS = new LinkedHashMap<>();
 
     static {
         for (ElixirModel.Kind k : ElixirModel.Kind.values()) {
-            for (int lv = 1; lv <= ElixirModel.MAX_LEVEL; lv++) {
+            for (int lv = 1; lv <= k.maxLevel(); lv++) {
                 final int level = lv;
                 ELIXIRS.put(k.id + "_" + lv, ITEMS.register("elixir_" + k.id + "_" + lv,
                     () -> new ElixirItem(k, level, new Item.Properties().stacksTo(16))));
@@ -36,7 +39,7 @@ public final class ModItems {
     public static Item elixir(ElixirModel.Kind k, int level) { return ELIXIRS.get(k.id + "_" + level).get(); }
 
     public static void addToTabs(BuildCreativeModeTabContentsEvent e) {
-        if (e.getTabKey() == CreativeModeTabs.INGREDIENTS) e.accept(PUTRID_ESSENCE);
+        if (e.getTabKey() == CreativeModeTabs.FUNCTIONAL_BLOCKS) e.accept(FLESH_ALTAR);
         if (e.getTabKey() == CreativeModeTabs.FOOD_AND_DRINKS) ELIXIRS.values().forEach(e::accept);
     }
 }

@@ -50,9 +50,9 @@ public final class ZapocConfig {
         b.pop();
 
         b.push("elixir");
-        EXTRA_FLESH_DROPS = b.comment("プレイヤーが倒したゾンビの腐肉ドロップを増やす(脅威レベルと強さに応じて。エリクサーの材料)")
+        EXTRA_FLESH_DROPS = b.comment("プレイヤーが倒したゾンビの腐肉ドロップを増やす(脅威レベルと強さに応じて。エリクサー1個=腐肉256個の材料)")
             .define("extraFleshDrops", true);
-        HORDE_REWARD = b.comment("ホードナイトを生き延びると腐肉のエッセンスがもらえる").define("hordeReward", true);
+        HORDE_REWARD = b.comment("ホードナイトを生き延びると腐肉(脅威レベルに応じた個数)がもらえる").define("hordeReward", true);
         b.pop();
 
         b.push("performance");

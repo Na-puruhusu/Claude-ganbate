@@ -8,16 +8,18 @@ package com.example.claudeganbate.difficulty;
  *   statLevel = progress + adj          … ゾンビの能力(HP/攻撃/速度/特殊)に使う
  *   spawnLevel= progress + 0.4 * adj    … 出現量に使う(装備での増減は能力より穏やかに)
  *
- * 永続エリクサーで強くなった分も、最大体力・防御・攻撃として装備Powerに含まれる(=強くなるほど少し厳しくなる)。
+ * 永続エリクサー(体力・耐久・ダメージ・スピード)の分も装備Powerに含まれる。標準プレイヤーは日数に応じた数の
+ * エリクサーを持つ前提(GearBench.STANDARD_ELIXIRS)なので、作らない人はゾンビが弱く、作り込む人は少し厳しくなる。
  */
 public final class ThreatCalculator {
     private ThreatCalculator() {}
 
     public static final double MAX_LEVEL = DayCurve.MAX_LEVEL;
-    public static final double DDA_K = 2.0, DDA_MIN = -2.0, DDA_MAX = 0.8;
+    public static final double DDA_K = 2.0, DDA_MIN = -3.0, DDA_MAX = 0.8;
     public static final double SPAWN_DDA_SHARE = 0.4;
 
-    public record Inputs(double worldDay, double maxHp, double armor, double toughness, double epf, double attack) {}
+    /** maxHp は体力エリクサー込みの最大HP。attack は素の武器ダメージ(ダメージエリクサーは elixirs から掛ける)。 */
+    public record Inputs(double worldDay, double maxHp, double armor, double toughness, double epf, double attack, ElixirModel.Levels elixirs) {}
 
     public record Threat(double day, double progress, double adj, double statLevel, double spawnLevel) {}
 
@@ -25,7 +27,7 @@ public final class ThreatCalculator {
         double progress = DayCurve.levelAt(in.worldDay(), t.daySpeed());
         double adj = 0;
         if (t.adaptive()) {
-            double p = GearBench.power(in.maxHp(), in.armor(), in.toughness(), in.epf(), in.attack());
+            double p = GearBench.power(in.maxHp(), in.armor(), in.toughness(), in.epf(), in.attack(), in.elixirs());
             double b = GearBench.benchPower(progress);
             adj = Curve.clamp(Math.log(p / b) * DDA_K, DDA_MIN, DDA_MAX);
         }

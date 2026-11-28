@@ -5,8 +5,8 @@ public record ZombieProfile(Variant variant, double hpMult, double damageMult, d
                             double armorAdd, double followRange, double kbResist) {
 
     // index = 脅威レベル(0..11)
-    static final double[] HP     = {1.00, 1.10, 1.25, 1.45, 1.70, 1.95, 2.20, 2.40, 2.60, 2.80, 3.00, 3.20};
-    static final double[] DMG    = {1.00, 1.05, 1.15, 1.30, 1.50, 1.70, 1.90, 2.05, 2.20, 2.35, 2.50, 2.70};
+    static final double[] HP     = {1.00, 1.10, 1.25, 1.45, 1.75, 2.10, 2.60, 3.10, 3.70, 4.30, 5.00, 5.40};
+    static final double[] DMG    = {1.00, 1.05, 1.15, 1.35, 1.75, 2.30, 3.10, 4.00, 5.00, 6.20, 7.50, 8.20};
     static final double[] ARMOR  = {0, 0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14};
     static final double[] SPEED  = {1.00, 1.00, 1.02, 1.04, 1.06, 1.08, 1.10, 1.12, 1.14, 1.16, 1.18, 1.20};
     static final double[] FOLLOW = {35, 38, 41, 44, 47, 50, 53, 56, 59, 62, 64, 64};

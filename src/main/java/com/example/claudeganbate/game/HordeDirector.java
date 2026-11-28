@@ -2,10 +2,10 @@ package com.example.claudeganbate.game;
 
 import com.example.claudeganbate.ClaudeGanbate;
 import com.example.claudeganbate.config.ZapocConfig;
+import com.example.claudeganbate.difficulty.ElixirModel;
 import com.example.claudeganbate.difficulty.SpawnPlanner;
 import com.example.claudeganbate.difficulty.ThreatCalculator.Threat;
 import com.example.claudeganbate.difficulty.Tuning;
-import com.example.claudeganbate.item.ModItems;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
@@ -21,6 +21,7 @@ import net.minecraft.world.entity.monster.ZombifiedPiglin;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraftforge.items.ItemHandlerHelper;
 import net.minecraftforge.event.TickEvent;
@@ -179,9 +180,9 @@ public final class HordeDirector {
         st.relaxUntil = now + 120 * 20;
         p.displayClientMessage(Component.translatable(cleared ? "zapoc.horde.cleared" : "zapoc.horde.dawn"), false);
         if (ZapocConfig.HORDE_REWARD.get() && p.isAlive()) {
-            // 生き延びた報酬: 腐肉のエッセンス(撃退なら2倍)。エリクサーの材料
-            int n = Math.max(1, st.wavesTotal * (cleared ? 2 : 1) + (int) (level / 3.0));
-            ItemHandlerHelper.giveItemToPlayer(p, new ItemStack(ModItems.PUTRID_ESSENCE.get(), n));
+            // 生き延びた報酬: 腐肉(撃退なら1.5倍)。エリクサー(1個=256個)の材料
+            int n = (int) Math.round(ElixirModel.hordeRewardFlesh(level) * (cleared ? 1.5 : 1.0));
+            for (int left = n; left > 0; left -= 64) ItemHandlerHelper.giveItemToPlayer(p, new ItemStack(Items.ROTTEN_FLESH, Math.min(64, left)));
             p.displayClientMessage(Component.translatable("zapoc.horde.reward", n), false);
         }
     }

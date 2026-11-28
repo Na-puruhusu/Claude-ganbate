@@ -34,15 +34,21 @@ public class DifficultySim {
     // ブローター死亡時の毒ガス: 毒I(約1.25秒に1ダメージ) 約4秒 = 約3ダメージ。装備軽減を受けない。
     static final double BLOATER_CLOUD_DMG = 3.0;
 
-    record Gear(double hp, double armor, double tough, double epf, double attack) {
-        static Gear bench(double level) {
-            return new Gear(GearBench.PLAYER_HP, Curve.at(GearBench.ARMOR, level), Curve.at(GearBench.TOUGH, level),
-                Curve.at(GearBench.EPF, level), Curve.at(GearBench.ATTACK, level));
+    /** hp は体力エリクサー込みの最大HP。lv はダメージ/耐久/スピードのエリクサー(attack は素の武器ダメージ)。 */
+    record Gear(double hp, double armor, double tough, double epf, double attack, ElixirModel.Levels lv) {
+        /** そのステージの標準プレイヤー(標準の数のエリクサーを持つ)。 */
+        static Gear bench(int stage) {
+            return withLevels(equipment(stage), GearBench.standardLevels(stage));
+        }
+        /** 装備だけ(エリクサーなし)。 */
+        static Gear equipment(int stage) {
+            return new Gear(GearBench.PLAYER_HP, Curve.at(GearBench.ARMOR, stage), Curve.at(GearBench.TOUGH, stage),
+                Curve.at(GearBench.EPF, stage), Curve.at(GearBench.ATTACK, stage), ElixirModel.Levels.NONE);
         }
     }
-    /** 4種すべてをレベル k まで飲んだプレイヤー(最大体力・防御・攻撃が増える)。 */
-    static Gear withElixirs(Gear g, int k) {
-        return new Gear(g.hp + ElixirModel.maxHpBonus(k), g.armor + ElixirModel.armorBonus(k), g.tough, g.epf, g.attack + ElixirModel.attackBonus(k));
+    /** 装備はそのままで、エリクサーのレベルだけ差し替える。 */
+    static Gear withLevels(Gear g, ElixirModel.Levels lv) {
+        return new Gear(GearBench.PLAYER_HP + lv.maxHpBonus(), g.armor, g.tough, g.epf, g.attack, lv);
     }
     record Result(double lossFrac, boolean died, double duration) {}
 
@@ -84,7 +90,7 @@ public class DifficultySim {
             if (atkTimer <= 0 && target != null) {
                 atkTimer = 0.625;
                 if (r.nextDouble() < HIT_RATE) {
-                    double atk = g.attack * CRIT_MEAN;
+                    double atk = g.attack * g.lv().damageMult() * CRIT_MEAN;
                     double d = atk * (1.0 - zombieReduction(target.p.armor(), atk));
                     if (alpha && target.p.variant() != Variant.ALPHA) d *= 1.0 - ZombieSpecialsModel.AURA_REDUCTION;  // アルファのオーラ
                     target.hp -= d;
@@ -106,9 +112,9 @@ public class DifficultySim {
                 if (slots-- <= 0) continue;
                 if (z.stun <= 0 && z.atkCd <= 0) {
                     z.atkCd = 1.0;
-                    if (r.nextDouble() >= st.land()) continue;
+                    if (r.nextDouble() >= st.land() * g.lv().evasion()) continue;
                     double raw = z.p.damage() * vanillaDifficulty;
-                    double applied = raw * (1.0 - GearBench.reduction(g.armor, g.tough, g.epf, raw));
+                    double applied = raw * (1.0 - GearBench.reduction(g.armor, g.tough, g.epf, raw)) * g.lv().takenMult();
                     if (t - lastHit >= 0.5) { hp -= applied; lastHit = t; }
                 }
             }
@@ -124,7 +130,7 @@ public class DifficultySim {
     /** 脅威レベル stage に到達する日(=その日数の標準プレイヤー)に、装備 g のプレイヤーが受ける脅威。 */
     static Threat threat(int stage, Gear g) {
         double day = DayCurve.dayAt(stage, T.daySpeed());
-        return ThreatCalculator.compute(new Inputs(day, g.hp, g.armor, g.tough, g.epf, g.attack), T);
+        return ThreatCalculator.compute(new Inputs(day, g.hp, g.armor, g.tough, g.epf, g.attack, g.lv()), T);
     }
 
     static List<Z> group(Threat th, int n, double spread, Random r, boolean leaders, int alphas) {
@@ -183,10 +189,35 @@ public class DifficultySim {
 
     /** 1対1の撃破時間(秒)。標準装備で理論値に近い値を返す。 */
     static double ttk(Gear g, ZombieProfile p) {
-        double atk = g.attack * CRIT_MEAN;
+        double atk = g.attack * g.lv().damageMult() * CRIT_MEAN;
         double perHit = atk * (1.0 - zombieReduction(p.armor(), atk));
         return Math.ceil(p.maxHp() / perHit) * 0.625 / HIT_RATE;
     }
+
+    // ---- 腐肉の経済 ----
+    /** プレイヤーが実際に倒す割合(逃げる・寝る・拠点にこもる・日光で燃える分を引く)。 */
+    static final double KILL_RATE = 0.5;
+    static final double NIGHT_SEC = 500, DAY_SEC = 700;
+
+    /** 1日に出現するゾンビの数(環境スポーン。夜+昼)。 */
+    static double zombiesPerDay(double level) {
+        double mean = SpawnPlanner.ambientGroupMean(level, T);
+        double n = NIGHT_SEC / SpawnPlanner.ambientIntervalSec(level, true, T) * mean;
+        if (level >= SpawnPlanner.DAY_MIN_LEVEL) n += DAY_SEC / SpawnPlanner.ambientIntervalSec(level, false, T) * mean * 0.5;
+        return n;
+    }
+    /** ゾンビ1体を倒して得る腐肉の期待値(バニラの平均1個 + 追加分)。 */
+    static double fleshPerZombie(double level, int looting) {
+        double total = 0, w = 0;
+        for (Variant v : Variant.values()) {
+            if (v == Variant.ALPHA) continue;
+            double wt = v.weightAt(level);
+            total += wt * (1.0 + 0.5 * looting + ElixirModel.fleshBonusMean(level, v, 0));
+            w += wt;
+        }
+        return total / w;
+    }
+    static double fleshPerDay(double level) { return zombiesPerDay(level) * KILL_RATE * fleshPerZombie(level, 0); }
 
     // ------------------------------------------------------------------
     static int failures = 0;
@@ -221,7 +252,7 @@ public class DifficultySim {
 
         System.out.println("\n=== 装備ズレ(DDA)の効き: 同じステージで装備だけ変える(環境グループ戦の 平均被害/死亡率) ===");
         System.out.println("St | gear-2.0        gear-1.0        on-curve        gear+1.0        gear+2.0");
-        double[] offs = {-2, -1, 0, 1, 2};
+        int[] offs = {-2, -1, 0, 1, 2};
         double[][] lossTab = new double[11][5];
         for (int s = 0; s <= 10; s++) {
             StringBuilder sb = new StringBuilder(String.format("%2d |", s));
@@ -234,28 +265,44 @@ public class DifficultySim {
             System.out.println(sb);
         }
 
-        System.out.println("\n=== 永続エリクサー(4種すべてLv k): 環境グループ戦の 被害率/死亡率 と DDAによるゾンビ強化(adj) ===");
-        System.out.println("Lv | Lv0              Lv1              Lv3              Lv5   (被害/死亡 [adj])");
-        double[][] elx = new double[11][4];
-        int[] ks = {0, 1, 3, 5};
+        System.out.println("\n=== エリクサーの数による違い: 環境グループ戦の 被害率/死亡率 [DDAによるゾンビ強化adj]。標準=そのステージで標準プレイヤーが持つ数 ===");
+        System.out.println("St 標準数 | なし(0個)           | 標準-4個            | 標準               | 標準+4個            | 全部(16個)");
+        double[][] elx = new double[11][5];
         for (int s = 0; s <= 10; s++) {
-            StringBuilder sb = new StringBuilder(String.format("%2d |", s));
-            for (int i = 0; i < ks.length; i++) {
-                Gear g = withElixirs(Gear.bench(s), ks[i]);
+            int std = GearBench.STANDARD_ELIXIRS[s];
+            int[] counts = {0, Math.max(0, std - 4), std, Math.min(ElixirModel.TOTAL_ELIXIRS, std + 4), ElixirModel.TOTAL_ELIXIRS};
+            StringBuilder sb = new StringBuilder(String.format("%2d  %3d個  |", s, std));
+            for (int i = 0; i < counts.length; i++) {
+                Gear g = withLevels(Gear.equipment(s), ElixirModel.standardLevels(counts[i]));
                 Agg a = ambient(s, g, 1.0, 1000 + s * 10 + i);
                 Threat th = threat(s, g);
                 elx[s][i] = a.meanLoss();
-                sb.append(String.format(" %4.2f/%4.2f [%+.2f]  ", a.meanLoss(), a.pDeath(), th.adj()));
+                sb.append(String.format(" %4.2f/%4.2f [%+.2f]   |", a.meanLoss(), a.pDeath(), th.adj()));
             }
             System.out.println(sb);
         }
 
-        System.out.println("\n=== 腐肉の経済(1種をLv5まで = 腐肉" + ElixirModel.totalFleshToMax() + "個) ===");
+        System.out.println("\n=== 腐肉の経済(全種類を揃える = " + ElixirModel.TOTAL_ELIXIRS + "個 × " + ElixirModel.FLESH_PER_ELIXIR + " = 腐肉" + ElixirModel.totalFleshToMax() + "個) ===");
         for (int s : new int[]{0, 2, 4, 6, 8, 10}) {
-            double sum = 0; int n = 20000; Random r = new Random(7 + s);
-            for (int i = 0; i < n; i++) sum += 1.0 + ElixirModel.fleshBonus(s, Variant.pick(s, true, r), 0, r);   // バニラ平均1 + 追加
-            double perZ = sum / n;
-            System.out.printf("L%2d: 1体あたり平均 腐肉%.2f個 → 1種Lv5まで 約%.0f体 / 4種で約%.0f体%n", s, perZ, ElixirModel.totalFleshToMax() / perZ, 4 * ElixirModel.totalFleshToMax() / perZ);
+            System.out.printf("L%2d: 1体あたり平均 腐肉%.2f個(ドロップ増加III %.2f個) → エリクサー1個 約%.0f体%n", s, fleshPerZombie(s, 0), fleshPerZombie(s, 3), ElixirModel.FLESH_PER_ELIXIR / fleshPerZombie(s, 0));
+        }
+        System.out.println("日  Lv | 1日の発生数(夜+昼) | 1日の腐肉(撃破率" + (int) (KILL_RATE * 100) + "%) | 累計供給 | 標準の必要量 | 余裕");
+        double[] econRatio = new double[11];
+        {
+            double cum = 0; int next = 0;
+            for (int d = 0; d <= 100 && next <= 10; d++) {
+                double lv = DayCurve.levelAt(d, T.daySpeed());
+                double perDay = fleshPerDay(lv);
+                // その日にホードナイトなら報酬
+                if (SpawnPlanner.isHordeNight(d, 7)) perDay += ElixirModel.hordeRewardFlesh(lv);
+                cum += perDay;
+                while (next <= 10 && d >= Math.ceil(DayCurve.dayAt(next, T.daySpeed()))) {
+                    double need = GearBench.STANDARD_ELIXIRS[next] * (double) ElixirModel.FLESH_PER_ELIXIR;
+                    econRatio[next] = need == 0 ? 99 : cum / need;
+                    System.out.printf("%3d  L%-2d | %5.1f体            | %6.0f個            | %6.0f個 | %6.0f個 | %s%n", d, next, zombiesPerDay(lv), perDay, cum, need, need == 0 ? "-" : String.format("x%.2f", cum / need));
+                    next++;
+                }
+            }
         }
 
         System.out.println("\n=== Hardモード(バニラ1.5倍 × 補正0.8)の on-curve 環境グループ ===");
@@ -299,24 +346,35 @@ public class DifficultySim {
             check(lossTab[s][4] <= lossTab[s][2] + 0.01, String.format("S%d 装備+2.0 の被害 %.2f が on-curve %.2f より重い", s, lossTab[s][4], lossTab[s][2]));
             check(lossTab[s][0] <= 0.90, String.format("S%d 装備-2.0 の被害率 %.2f(DDAが効かず理不尽)", s, lossTab[s][0]));
         }
-        // 5b) エリクサー: 飲むほど楽になる(=報われる)が、DDAで厳しくなる分もあり、無双にはならない
-        for (int s = 1; s <= 10; s++) {
-            check(elx[s][3] <= elx[s][0] - 0.03, String.format("L%d エリクサーLv5の効果が薄い(%.2f vs なし %.2f)", s, elx[s][3], elx[s][0]));
-            check(elx[s][1] <= elx[s][0] + 0.02 && elx[s][2] <= elx[s][1] + 0.02 && elx[s][3] <= elx[s][2] + 0.02, String.format("L%d エリクサーのレベル順に効果が単調でない", s));
-            check(elx[s][3] >= 0.08, String.format("L%d エリクサーLv5で通常の夜がほぼ無傷(%.2f): 無双", s, elx[s][3]));
+        // 5b) エリクサー: 多く持つほど楽になる(=報われる)が、DDAで厳しくなる分もあり、無双にはならない。作らない人も詰まない
+        for (int s = 3; s <= 10; s++) {
+            check(s >= 5 && s <= 8 ? elx[s][3] <= elx[s][2] - 0.02 : elx[s][3] <= elx[s][2] + 0.01, String.format("L%d 標準+4個の効果が薄い(%.2f vs 標準 %.2f)", s, elx[s][3], elx[s][2]));
+            check(elx[s][0] >= elx[s][2] + 0.02, String.format("L%d エリクサーなし(%.2f)が標準(%.2f)より楽: 作る意味がない", s, elx[s][0], elx[s][2]));
+            check(elx[s][0] <= 0.92, String.format("L%d エリクサーなしの被害率 %.2f(DDAが効かず理不尽)", s, elx[s][0]));
+            check(elx[s][1] >= elx[s][2] - 0.02 && elx[s][2] >= elx[s][3] - 0.02 && elx[s][3] >= elx[s][4] - 0.02, String.format("L%d エリクサーの数に対して単調でない", s));
+            check(elx[s][3] >= 0.06, String.format("L%d 標準+4個で通常の夜がほぼ無傷(%.2f): 無双", s, elx[s][3]));
+            if (s >= 8) check(elx[s][4] >= 0.06, String.format("L%d エリクサー全部で通常の夜がほぼ無傷(%.2f): 無双", s, elx[s][4]));
         }
-        // 5c) エリクサーのレシピ枠(3x3クラフトに収まる)・コスト単調性・腐肉経済
-        for (int l = 1; l <= ElixirModel.MAX_LEVEL; l++) {
-            int ingredients = 1 + ElixirModel.essenceCost(l) + ElixirModel.catalystCost(l);   // 前の薬(Lv1は空き瓶) + エッセンス + 触媒
-            check(ingredients <= 9, "エリクサーLv" + l + "のレシピが9スロットに収まらない: " + ingredients);
-            if (l > 1) check(ElixirModel.essenceCost(l) >= ElixirModel.essenceCost(l - 1), "エッセンスのコストが単調でない Lv" + l);
+        // 5c) エリクサーの定義・コスト・腐肉経済
+        check(ElixirModel.FLESH_PER_ELIXIR == 256, "エリクサーは腐肉4スタック(256個)");
+        check(ElixirModel.Kind.DAMAGE.maxLevel() == 4 && ElixirModel.Kind.SPEED.maxLevel() == 4 && ElixirModel.Kind.DURABILITY.maxLevel() == 3 && ElixirModel.Kind.HEALTH.maxLevel() == 5, "エリクサーのレベル数が仕様と違う");
+        check(Arrays.equals(ElixirModel.Kind.DAMAGE.values, new double[]{0.15, 0.30, 0.45, 0.60}) && Arrays.equals(ElixirModel.Kind.SPEED.values, new double[]{0.25, 0.50, 0.75, 1.00})
+            && Arrays.equals(ElixirModel.Kind.DURABILITY.values, new double[]{0.20, 0.40, 0.60}) && Arrays.equals(ElixirModel.Kind.HEALTH.values, new double[]{2, 4, 6, 8, 10}), "エリクサーの効果量が仕様と違う");
+        ElixirModel.Levels all = ElixirModel.standardLevels(ElixirModel.TOTAL_ELIXIRS);
+        check(all.damage() == 4 && all.speed() == 4 && all.durability() == 3 && all.health() == 5 && all.total() == ElixirModel.TOTAL_ELIXIRS, "標準の順番で全部作ると全種類が最大になるはず");
+        check(all.maxHpBonus() == 20 && Math.abs(all.takenMult() - 0.4) < 1e-9 && Math.abs(all.damageMult() - 1.6) < 1e-9 && Math.abs(all.speedBonus() - 1.0) < 1e-9, "最大レベルの効果が仕様と違う");
+        check(ElixirModel.Levels.NONE.maxHpBonus() == 0 && ElixirModel.Levels.NONE.takenMult() == 1.0 && ElixirModel.Levels.NONE.damageMult() == 1.0, "未摂取は効果なし");
+        check(new ElixirModel.Levels(99, 99, 99, 99).equals(all), "レベルは上限に丸められる");
+        for (int i = 1; i < GearBench.STANDARD_ELIXIRS.length; i++) check(GearBench.STANDARD_ELIXIRS[i] >= GearBench.STANDARD_ELIXIRS[i - 1], "標準エリクサー数が単調でない");
+        check(GearBench.STANDARD_ELIXIRS[GearBench.STANDARD_ELIXIRS.length - 1] == ElixirModel.TOTAL_ELIXIRS, "最終ステージで全種類が揃う想定");
+        // 腐肉の供給が標準の進行を賄えること(撃破率50%でも足りる)。ただし余りすぎない(4倍まで)
+        for (int s = 3; s <= 10; s++) {
+            check(econRatio[s] >= 1.05, String.format("L%d: 腐肉の供給が標準のエリクサー進行に足りない(余裕 x%.2f)", s, econRatio[s]));
+            check(econRatio[s] <= 4.0, String.format("L%d: 腐肉が余りすぎ(余裕 x%.2f)。256個の重みが消える", s, econRatio[s]));
         }
-        check(ElixirModel.maxHpBonus(5) == 10 && ElixirModel.maxHpBonus(0) == 0 && ElixirModel.maxHpBonus(9) == 10, "エリクサー効果の上限/下限が不正");
-        for (int s : new int[]{2, 6, 10}) {
-            double sum = 0; int n = 20000; Random r = new Random(7 + s);
-            for (int i = 0; i < n; i++) sum += 1.0 + ElixirModel.fleshBonus(s, Variant.pick(s, true, r), 0, r);
-            double zNeeded = ElixirModel.totalFleshToMax() / (sum / n);
-            check(zNeeded >= 40 && zNeeded <= 200, String.format("L%d: 1種Lv5までに必要なゾンビ数 %.0f が目安(40〜200体)の外", s, zNeeded));
+        for (int s : new int[]{1, 4, 8}) {
+            double z = ElixirModel.FLESH_PER_ELIXIR / fleshPerZombie(s, 0);
+            check(z >= 40 && z <= 200, String.format("L%d: エリクサー1個に必要なゾンビ数 %.0f が目安(40〜200体)の外", s, z));
         }
         // 6) モデルの単調性・上限
         for (double l = 0; l < 10.9; l += 0.1) {

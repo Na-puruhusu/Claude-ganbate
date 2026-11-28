@@ -1,5 +1,6 @@
 package com.example.claudeganbate;
 
+import com.example.claudeganbate.block.ModBlocks;
 import com.example.claudeganbate.config.ZapocConfig;
 import com.example.claudeganbate.item.ModItems;
 import com.mojang.logging.LogUtils;
@@ -19,6 +20,7 @@ public class ClaudeGanbate {
     public ClaudeGanbate() {
         ModLoadingContext.get().registerConfig(ModConfig.Type.SERVER, ZapocConfig.SPEC);
         IEventBus modBus = FMLJavaModLoadingContext.get().getModEventBus();
+        ModBlocks.BLOCKS.register(modBus);
         ModItems.ITEMS.register(modBus);
         modBus.addListener(ModItems::addToTabs);
         LOGGER.info("Zombie Apocalypse loaded");
